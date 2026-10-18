@@ -3,6 +3,8 @@
 Управление мышью в Windows 11 через веб-камеру: рукой, взглядом или поворотом головы.
 Режим выбирается переключателем **Рука / Глаза / Голова** вверху окна.
 
+**[Скачать AirMouse для Windows](https://github.com/Future-Web2/AirMouse/releases/latest/download/AirMouse-windows-x64.zip)** (zip, 124 МБ). Распакуйте архив целиком и запустите `AirMouse\AirMouse.exe`, Python не нужен. Все версии — на странице [Releases](https://github.com/Future-Web2/AirMouse/releases).
+
 ![AirMouse в дизайне Liquid Glass](docs/screenshot_glass.png)
 
 ## Запуск
