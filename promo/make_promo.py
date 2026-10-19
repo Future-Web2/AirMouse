@@ -436,6 +436,7 @@ def camera_panel(frame, label="Камера"):
 
 
 class HandDemo:
+    TITLE = "Режим «Рука»"
     LENGTH = 13.0
     KEYS = [(0.0, 960, 540), (0.4, 960, 540), (1.5, 480, 300), (2.6, 480, 300), (3.3, 900, 860), (3.9, 900, 860),
             (4.9, 900, 1000), (5.4, 900, 1000), (6.1, 960, 570), (6.6, 960, 570), (7.8, 1460, 860),
@@ -470,7 +471,7 @@ class HandDemo:
 
     def __call__(self, frame, t):
         rec = self.frames[min(int(t * FPS), len(self.frames) - 1)]
-        scene_title(frame, "Режим «Рука»", t, 92, 56)
+        scene_title(frame, self.TITLE, t, 92, 56)
         camera_panel(frame)
         x, y, w, h = CAMERA
         k = min(w / 640, (h - 40) / 480)
@@ -532,6 +533,7 @@ class Stability:
 
 
 class EyesDemo:
+    TITLE = "Режим «Глаза»"
     LENGTH = 11.0
     DOTS = [(150, 120), (960, 120), (1770, 120), (1770, 540), (960, 540), (150, 540), (150, 960), (960, 960),
             (1770, 960)]
@@ -573,7 +575,7 @@ class EyesDemo:
 
     def __call__(self, frame, t):
         rec = self.frames[min(int(t * FPS), len(self.frames) - 1)]
-        scene_title(frame, "Режим «Глаза»", t, 92, 56)
+        scene_title(frame, self.TITLE, t, 92, 56)
         camera_panel(frame)
         x, y, w, h = CAMERA
         cx, cy = x + w / 2, y + h / 2 + 24
@@ -795,8 +797,9 @@ def render_frame(scenes, duration, backdrop, t):
 
 # -- music -------------------------------------------------------------------
 
-def make_music(path, duration, whooshes, clicks, sr=44100):
-    """Ambient pad + soft arpeggio + gentle pulse, whooshes on scene changes, ticks on clicks."""
+def make_music(path, duration, whooshes, clicks, sr=44100, arp_from=5.4, pulse=(10.4, 47.0)):
+    """Ambient pad + soft arpeggio (from arp_from) + gentle pulse (during pulse), whooshes on scene changes,
+    ticks on clicks."""
     n = int(duration * sr)
     t = np.arange(n) / sr
     music = np.zeros(n)
@@ -822,7 +825,7 @@ def make_music(path, duration, whooshes, clicks, sr=44100):
         music[a:b] += 0.1 * env * np.sin(2 * np.pi * hz(notes[0] - 12) * tt)
 
     pattern = (0, 2, 1, 3, 2, 4, 3, 1)
-    for j, st in enumerate(np.arange(5.4, duration - 3.0, 0.25)):
+    for j, st in enumerate(np.arange(arp_from, duration - 3.0, 0.25)):
         notes = chords[int(st // bar) % len(chords)]
         f = hz(notes[pattern[j % 8] % len(notes)] + 12)
         a, b = int(st * sr), min(n, int((st + 1.2) * sr))
@@ -830,7 +833,7 @@ def make_music(path, duration, whooshes, clicks, sr=44100):
         env = np.exp(-tt * 5) * np.clip(tt / 0.004, 0, 1)
         music[a:b] += 0.03 * env * (np.sin(2 * np.pi * f * tt) + 0.3 * np.sin(4 * np.pi * f * tt) * np.exp(-tt * 8))
 
-    for st in np.arange(10.4, 47.0, 1.0):   # soft pulse while the demos run
+    for st in np.arange(*pulse, 1.0):   # soft pulse while the demos run
         a, b = int(st * sr), min(n, int((st + 0.35) * sr))
         tt = t[a:b] - st
         f = 52 + 40 * np.exp(-tt * 30)

@@ -1,0 +1,74 @@
+# Тексты для публикации
+
+Готовые тексты к видео-гайду [`AirMouse_guide.mp4`](AirMouse_guide.mp4) (1:25, 1920×1080, с музыкой; всё сказано подписями, поэтому смотрится и без звука). Подробная инструкция с картинками — [`docs/GUIDE.md`](../docs/GUIDE.md).
+
+## Telegram, VK — пост с видео
+
+Текст короче 1024 символов, поэтому помещается в подпись к видео в Telegram.
+
+```text
+🖐 AirMouse — управляйте компьютером рукой, взглядом или головой
+
+Нужна только обычная веб-камера. Ладонь ведёт курсор, щипок — клик, два пальца — прокрутка, большой палец вверх — виджеты на экране.
+
+Что внутри:
+• курсор не дрожит, даже если дрожит рука
+• виджеты прямо на экране: громкость, музыка, свои кнопки
+• «Подробнее»: 23 параметра, включая 60 кадр/с
+• новый дизайн «Природа» — запотевшее стекло с каплями
+• изображение с камеры обрабатывается на компьютере и никуда не отправляется
+
+Как начать:
+1. Скачайте AirMouse-windows-x64.zip: github.com/Future-Web2/AirMouse/releases
+2. Распакуйте и запустите AirMouse.exe
+3. Нажмите «Старт» и поднимите ладонь
+
+Бесплатно, Windows 10 и 11. Как пользоваться — в видео 👆
+
+#AirMouse #Windows #жесты #вебкамера
+```
+
+## Короткий пост (X, Threads, подпись в Instagram)
+
+```text
+Управляю компьютером рукой в воздухе через обычную веб-камеру 🖐 Щипок — клик, два пальца — прокрутка, большой палец вверх — виджеты на экране. AirMouse, бесплатно для Windows: github.com/Future-Web2/AirMouse
+```
+
+## YouTube
+
+**Название:** AirMouse: управление компьютером рукой через веб-камеру — гайд за полторы минуты
+
+**Описание:**
+
+```text
+AirMouse управляет мышью в Windows через обычную веб-камеру: рукой, взглядом или поворотом головы. Бесплатно, установка не нужна.
+
+Скачать: https://github.com/Future-Web2/AirMouse/releases/latest
+Инструкция с картинками: https://github.com/Future-Web2/AirMouse/blob/main/docs/GUIDE.md
+
+0:00 Установка
+0:12 Старт и как держать руку
+0:24 Жесты рукой
+0:37 Виджеты на экране
+0:47 Глаза и голова
+0:57 «Подробнее»: 60 кадр/с и 23 параметра
+1:07 Дизайн «Природа» и советы
+
+Ctrl+Alt+M — пауза, Ctrl+Alt+W — виджеты.
+```
+
+**Теги:** AirMouse, управление жестами, мышь без рук, веб-камера, Windows 11, MediaPipe
+
+## English (short)
+
+```text
+AirMouse turns an ordinary webcam into a mouse: move the cursor with your hand, eyes or head. Pinch to click, two fingers to scroll, thumbs up for on-screen widgets. Free for Windows 10/11, interface in Russian: github.com/Future-Web2/AirMouse
+```
+
+## Что ещё приложить
+
+- [`AirMouse_poster.png`](AirMouse_poster.png) — постер 4:5 для Telegram и Instagram.
+- [`AirMouse_promo.mp4`](AirMouse_promo.mp4) — промо-ролик на 53 секунды, без инструкции.
+- Скриншоты: [`docs/screenshot_nature.png`](../docs/screenshot_nature.png) (дизайн «Природа»), [`docs/screenshot_widgets.png`](../docs/screenshot_widgets.png) (виджеты), [`docs/screenshot_advanced.png`](../docs/screenshot_advanced.png) («Подробнее»).
+
+Видео горизонтальное (16:9): для ленты Telegram, VK, YouTube и X. Для Reels, Shorts и TikTok нужна вертикальная версия 9:16, её пока нет.
