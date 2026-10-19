@@ -1,0 +1,21 @@
+name: Тесты
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+          cache: pip
+      - name: Зависимости
+        run: python -m pip install --no-deps -r requirements.txt
+      - name: Автотесты
+        run: python -m unittest -v
+      - name: Модели загружаются
+        run: python main.py --selftest

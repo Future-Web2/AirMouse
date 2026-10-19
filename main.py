@@ -2,6 +2,7 @@
 
     python main.py              start the app
     python main.py --selftest   load the hand model once and exit (checks a build)
+    python main.py --bench [report.json]   measure the KPIs of docs/KPI.md
 """
 
 import ctypes
@@ -36,6 +37,10 @@ def main():
         from airmouse import ui, ui_classic  # noqa: F401  (checks the UI libraries load)
         from airmouse.tracker import selftest
         return selftest()
+    if "--bench" in sys.argv:
+        from airmouse import bench
+        args = sys.argv[sys.argv.index("--bench") + 1:]
+        return bench.run(args[0] if args else None)
 
     if not _first_instance():
         ctypes.windll.user32.MessageBoxW(None, "AirMouse уже запущен.", "AirMouse", 0x40)
