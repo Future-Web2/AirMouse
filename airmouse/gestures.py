@@ -43,12 +43,14 @@ SCROLL_ENTER_FRAMES = 4
 SCROLL_EXIT_FRAMES = 3
 OPEN_FACTOR = 1.5           # fingers count as apart at 1.5x the touch distance
 EXTENDED_RATIO = 1.15       # straight finger: tip this much farther from the wrist than the middle joint
+THUMB_ABOVE = 0.35          # thumbs up: thumb tip this far (in palm lengths) above the rest of the hand
 
 # Seconds
 RIGHT_CLICK_WINDOW = 0.12   # time for the middle finger to join a pinch
 REWIND = 0.12               # click where the cursor was this long before the pinch
 POST_CLICK_HOLD = 0.5       # cursor stays put after a click, so a double click lands in place
 HAND_LOST_TIMEOUT = 0.3
+THUMB_TIME = 0.5            # hold a thumbs up this long to show / hide the on-screen widgets
 
 # Screen pixels at 1920 px width, scaled to the real screen
 DRAG_START_PX = 30
@@ -98,12 +100,12 @@ class HandFeatures:
         size = max(_dist(pts[WRIST], pts[MIDDLE_MCP]), 1e-6)
         self.pinch_index = _dist(pts[THUMB_TIP], pts[INDEX_TIP]) / size
         self.pinch_middle = _dist(pts[THUMB_TIP], pts[MIDDLE_TIP]) / size
-        self.two_fingers = (
-            _extended(pts, INDEX_TIP, INDEX_PIP)
-            and _extended(pts, MIDDLE_TIP, MIDDLE_PIP)
-            and not _extended(pts, RING_TIP, RING_PIP)
-            and not _extended(pts, PINKY_TIP, PINKY_PIP)
-        )
+        straight = [_extended(pts, tip, pip) for tip, pip in
+                    ((INDEX_TIP, INDEX_PIP), (MIDDLE_TIP, MIDDLE_PIP), (RING_TIP, RING_PIP), (PINKY_TIP, PINKY_PIP))]
+        self.two_fingers = straight == [True, True, False, False]
+        # Thumbs up: a fist with the thumb standing well above it.
+        self.thumb_up = not any(straight) and (
+            pts[THUMB_TIP][1] < min(p[1] for p in pts[INDEX_MCP:]) - THUMB_ABOVE * size)
         self.palm = palm_center(pts)
 
 
@@ -111,7 +113,8 @@ class GestureEngine:
     """Turns a stream of hand landmarks into mouse actions.
 
     Actions: ("move", x, y), ("down", button), ("up", button),
-    ("click", button) and ("wheel", delta).
+    ("click", button), ("wheel", delta), and ("widgets",) for a held thumbs up.
+    `pinch` tells how close the fingers are to a click: 0 apart .. 1 touching.
     """
 
     def __init__(self, settings, screen_w, screen_h):
@@ -124,6 +127,10 @@ class GestureEngine:
 
     def _reset(self):
         self.mode = NO_HAND
+        self.pinch = 0.0
+        self._thumb_since = None           # when the thumbs up began
+        self._thumb_miss = 0               # frames since it was last seen
+        self._thumb_done = False           # this thumbs up already toggled the widgets
         self._filter.reset()
         self._ptr.reset()
         self._raw = deque(maxlen=3)
@@ -186,6 +193,8 @@ class GestureEngine:
 
     def _gesture(self, f, hand, t, actions):
         close = self.settings.pinch_threshold
+        nearest = min(f.pinch_index, f.pinch_middle)
+        self.pinch = min(max((close * OPEN_FACTOR - nearest) / (close * (OPEN_FACTOR - 1)), 0.0), 1.0)
         index_touch = f.pinch_index < close
         middle_touch = f.pinch_middle < close
         apart = f.pinch_index > close * OPEN_FACTOR and f.pinch_middle > close * OPEN_FACTOR
@@ -201,6 +210,8 @@ class GestureEngine:
             self._pose = self._pose + 1 if f.two_fingers else 0
             if self._pose >= SCROLL_ENTER_FRAMES:
                 self._begin_scroll(hand, actions)
+            else:
+                self._thumbs_up(f.thumb_up, t, actions)
         elif mode == SCROLL:
             self._pose = 0 if f.two_fingers else self._pose + 1
             if self._pose >= SCROLL_EXIT_FRAMES:
@@ -233,6 +244,23 @@ class GestureEngine:
         elif mode == RIGHT:
             if released:
                 self._after_click(t)
+        if self.mode != MOVE:
+            self._thumb_since = None
+
+    def _thumbs_up(self, seen, t, actions):
+        # One noisy frame does not end the gesture; letting go (3 frames) arms it again.
+        if seen:
+            self._thumb_miss = 0
+            if self._thumb_since is None:
+                self._thumb_since = t
+            elif not self._thumb_done and t - self._thumb_since >= THUMB_TIME:
+                actions.append(("widgets",))
+                self._thumb_done = True
+            return
+        self._thumb_miss += 1
+        if self._thumb_miss >= 3:
+            self._thumb_since = None
+            self._thumb_done = False
 
     def _begin_pinch(self, hand, t, middle_touch, actions):
         # Already held right after a click: keep the same spot, so a second

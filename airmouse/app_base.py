@@ -1,18 +1,22 @@
-"""Behaviour shared by both window designs: tracking, modes, calibration, hotkey, settings.
+"""Behaviour shared by both window designs: tracking, modes, calibration, hotkeys, settings,
+the on-screen widgets and the session numbers.
 
 A design (ui.py for Liquid Glass, ui_classic.py for the classic look) subclasses
 BaseApp, builds its window in __init__ and implements the hooks at the bottom.
 """
 
+import time
 import tkinter as tk
+from collections import deque
 from tkinter import messagebox
 
 import cv2
 
-from . import resource_path, winmouse
+from . import resource_path, system, winmouse
 from .calibration import GazeCalibration
 from .face import EYES_CLOSED, NO_FACE
 from .gestures import DRAG, MOVE, NO_HAND, PENDING, PRESSED, RIGHT, SCROLL
+from .onscreen import OnScreen
 from .settings import Settings
 from .tracker import Tracker, preload
 
@@ -50,6 +54,7 @@ GESTURES = {
         ("Сжать, держать и вести", "перетаскивание"),
         ("Большой + два пальца", "правый клик"),
         ("Два пальца вверх / вниз", "прокрутка"),
+        ("Большой палец вверх", "показать / скрыть виджеты"),
     ),
     "gaze": (
         ("Взгляд", "переносит курсор, куда смотрите"),
@@ -76,6 +81,39 @@ def meter_value(face, key):
     return face.blink[key] if isinstance(key, int) else getattr(face, key)
 
 
+class Session:
+    """Numbers for the «Сеанс» card: frame rate over the last minute, processor use, what was done."""
+
+    def __init__(self):
+        self.fps = deque(maxlen=120)   # a sample every half second
+        self.cpu = 0.0
+        self.started = None
+        self._load = system.ProcessLoad()
+        self._next = self._next_cpu = 0.0
+
+    def sample(self, tracker, now):
+        if tracker is None:
+            self.started = None
+            self.fps.clear()
+            return
+        if self.started is None:
+            self.started = now
+            self._load.cpu()
+        if now >= self._next:
+            self._next = now + 0.5
+            self.fps.append(tracker.fps)
+        if now >= self._next_cpu:
+            self._next_cpu = now + 1.0
+            self.cpu = self._load.cpu()
+
+    def summary(self, tracker, now):
+        """(duration "мм:сс", "кадр/с", processor text, actions text) for a running tracker."""
+        seconds = max(int(now - self.started), 0) if self.started is not None else 0
+        stats = tracker.stats
+        return (f"{seconds // 60:02d}:{seconds % 60:02d}", f"{tracker.fps:.0f} кадр/с", f"процессор {self.cpu:.0f}%",
+                f"клики {stats['left']}  ·  правые {stats['right']}  ·  прокрутка {stats['wheel']}")
+
+
 class BaseApp:
     def __init__(self, autostart=False):
         """autostart: start the camera right away (after switching design while it was on)."""
@@ -96,7 +134,11 @@ class BaseApp:
         self._save_job = None
         self._jobs = set()
         self._hotkey_was_down = False
+        self._widgets_key_was_down = False
         self._calibrate_left = 0
+        self.session = Session()
+        self.onscreen = None       # the on-screen widgets, created once the window exists
+        self._editor = None
 
         self.root = tk.Tk()
         self.root.title("AirMouse")
@@ -109,10 +151,22 @@ class BaseApp:
         """Call at the end of the subclass __init__, once the window is built."""
         self.root.attributes("-topmost", self.settings.always_on_top)
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
+        self.onscreen = OnScreen(self, self.scale())
         if self._autostart:
             self._start()
         else:
             self.after(PRELOAD_DELAY, preload)
+
+    def scale(self):
+        """Display scale (1.0 at 100%), in quarter steps."""
+        return max(round(self.root.winfo_fpixels("1i") / 96.0 * 4) / 4, 1.0)
+
+    def open_widget_editor(self):
+        from .widget_editor import WidgetEditor
+        if self._editor is not None and self._editor.alive():
+            self._editor.focus()
+        else:
+            self._editor = WidgetEditor(self)
 
     def run(self):
         self.root.mainloop()
@@ -245,13 +299,19 @@ class BaseApp:
     # -- polling (call every frame from the design's timer) ----------------
 
     def _poll(self):
-        down = all(winmouse.key_down(vk) for vk in (winmouse.VK_CONTROL, winmouse.VK_MENU, ord("M")))
+        ctrl_alt = winmouse.key_down(winmouse.VK_CONTROL) and winmouse.key_down(winmouse.VK_MENU)
+        down = ctrl_alt and winmouse.key_down(ord("M"))
         if down and not self._hotkey_was_down:
             self._set_control(not self.control)
             self._show_control(self.control)
         self._hotkey_was_down = down
+        down = ctrl_alt and winmouse.key_down(ord("W"))
+        if down and not self._widgets_key_was_down and self.onscreen is not None:
+            self.onscreen.toggle()
+        self._widgets_key_was_down = down
 
         tracker = self.tracker
+        self.session.sample(tracker if self._has_frame else None, time.perf_counter())
         if tracker is None:
             return
         if tracker.error:
@@ -263,6 +323,8 @@ class BaseApp:
         if frame is not None:
             self._has_frame = True
             self._on_frame(frame)
+            if self.onscreen is not None:
+                self.onscreen.on_frame(frame)
         if self._needs_calibration and tracker.face and tracker.face[1] is not None:
             self._open_gaze_calibration()
 
@@ -303,6 +365,8 @@ class BaseApp:
 
     def _on_close(self):
         self._stop()
+        if self.onscreen is not None:
+            self.onscreen.close()
         if self._save_job is not None:
             self.root.after_cancel(self._save_job)
         for job in self._jobs:

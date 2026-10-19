@@ -198,6 +198,7 @@ class FaceEngine:
 
     def _reset(self):
         self.mode = NO_FACE
+        self.progress = 0.0        # eyes shut long enough for a click: 0 .. 1
         self._ptr.reset()
         self._head_filter.reset()
         self._gaze_filter.reset()
@@ -274,6 +275,7 @@ class FaceEngine:
             self.mode = EYES_CLOSED
         else:
             self.mode = MOVE
+        self.progress = min(self._both_time / self.settings.blink_time, 1.0) if self._eyes_shut else 0.0
         return actions
 
     # -- where the cursor should be ------------------------------------------

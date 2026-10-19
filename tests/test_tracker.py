@@ -2,11 +2,37 @@
 
 import importlib.util
 import unittest
+from collections import Counter
+from types import SimpleNamespace
 
 import numpy as np
 
 from airmouse import bench, tracker
+from airmouse.app_base import Session
 from airmouse.settings import Settings
+
+
+class CountingTest(unittest.TestCase):
+    def test_actions_are_counted_for_the_session(self):
+        trk = tracker.Tracker(Settings())
+        for action in (("move", 1, 2), ("click", "left"), ("down", "left"), ("up", "left"), ("click", "right"),
+                       ("wheel", 30), ("wheel", -30)):
+            trk._note(action, 1.0)
+        self.assertEqual(trk.stats, Counter(left=2, right=1, wheel=2))
+        self.assertEqual([number for number, _t, _a in trk.events], [1, 2, 3, 4, 5, 6])   # moves are not kept
+
+    def test_session_summary(self):
+        session = Session()
+        trk = SimpleNamespace(fps=29.6, stats=Counter(left=3, right=1, wheel=10))
+        session.sample(trk, 100.0)
+        session.sample(trk, 100.6)
+        duration, fps, cpu, actions = session.summary(trk, 165.0)
+        self.assertEqual((duration, fps), ("01:05", "30 кадр/с"))
+        self.assertTrue(cpu.startswith("процессор "))
+        self.assertEqual(actions, "клики 3  ·  правые 1  ·  прокрутка 10")
+        self.assertEqual(len(session.fps), 2)
+        session.sample(None, 170.0)
+        self.assertIsNone(session.started)
 
 
 @unittest.skipUnless(importlib.util.find_spec("mediapipe"), "mediapipe is not installed")

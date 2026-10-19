@@ -101,6 +101,16 @@ class BlinkTest(unittest.TestCase):
         sim.blink(0.6)
         self.assertEqual(sim.events, [("click", "left")] * 3)   # one click, then the double click
 
+    def test_progress_fills_while_the_eyes_stay_shut(self):
+        sim = FaceSim()
+        sim.step(frames=30)
+        sim.step(blink=(SHUT, SHUT), frames=6)
+        self.assertTrue(0.2 < sim.engine.progress < 0.8)
+        sim.step(blink=(SHUT, SHUT), frames=10)
+        self.assertEqual(sim.engine.progress, 1.0)
+        sim.step(frames=2)
+        self.assertEqual(sim.engine.progress, 0.0)
+
     def test_wink_is_a_right_click(self):
         sim = FaceSim()
         sim.step(frames=30)

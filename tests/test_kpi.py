@@ -22,7 +22,12 @@ class CursorKpiTest(unittest.TestCase):
         self.assertLessEqual(result["offset_px"], 2.0)
 
     def test_every_pinch_is_one_click(self):
-        self.assertEqual(bench.pinch_series(), {"pinches": 20, "left": 20, "right": 0, "scroll": 0})
+        self.assertEqual(bench.pinch_series(), {"pinches": 20, "left": 20, "right": 0, "scroll": 0, "widgets": 0})
+
+    def test_thumbs_up_toggles_the_widgets_once_per_hold(self):
+        result = bench.thumbs_up()
+        self.assertEqual((result["toggles"], result["other_actions"]), (3, 0))
+        self.assertLessEqual(result["seconds_to_toggle"], 0.7)
 
     def test_double_click(self):
         self.assertTrue(bench.double_click()["same_pixel"])

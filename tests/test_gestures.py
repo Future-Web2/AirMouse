@@ -175,6 +175,47 @@ class ScrollTest(unittest.TestCase):
         self.assertLess(self.scroll(invert=True), 0)
 
 
+class ThumbsUpTest(unittest.TestCase):
+    def test_a_held_thumbs_up_toggles_the_widgets_once(self):
+        sim = quiet()
+        ox, oy = cam_for(960, 540)
+        sim.rest(30, ox, oy)
+        sim.rest(9, ox, oy, pose="thumb")            # 0.3 s: not yet
+        self.assertEqual(kinds(sim), [])
+        sim.rest(30, ox, oy, pose="thumb")           # held on: still only once
+        self.assertEqual(kinds(sim), [("widgets",)])
+        sim.rest(10, ox, oy)
+        sim.rest(30, ox, oy, pose="thumb")
+        self.assertEqual(kinds(sim), [("widgets",)] * 2)
+
+    def test_not_from_the_scroll_pose(self):
+        sim = quiet()
+        ox, oy = cam_for(960, 540)
+        sim.rest(30, ox, oy)
+        sim.rest(6, ox, oy, pose="two")
+        sim.rest(10, ox, oy, pose="thumb")
+        self.assertNotIn(("widgets",), kinds(sim))
+
+    def test_fist_and_open_hand_are_not_thumbs_up(self):
+        self.assertTrue(HandFeatures(hand(300, 200, pose="thumb")).thumb_up)
+        self.assertFalse(HandFeatures(hand(300, 200)).thumb_up)
+        fist = hand(300, 200, pose="thumb")
+        fist[4] = (fist[8][0] - 20, fist[8][1], 0.0)   # thumb across the curled fingers
+        self.assertFalse(HandFeatures(fist).thumb_up)
+
+
+class PinchProgressTest(unittest.TestCase):
+    def test_progress_follows_the_fingers(self):
+        sim = quiet()
+        ox, oy = cam_for(960, 540)
+        sim.rest(30, ox, oy)
+        self.assertEqual(sim.engine.pinch, 0.0)
+        sim.step(ox, oy, pinch=0.7)
+        self.assertTrue(0.2 < sim.engine.pinch < 0.8)
+        sim.step(ox, oy, pinch=1.0)
+        self.assertEqual(sim.engine.pinch, 1.0)
+
+
 class HandLostTest(unittest.TestCase):
     def drag(self):
         sim = quiet()

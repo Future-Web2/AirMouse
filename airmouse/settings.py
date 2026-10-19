@@ -24,6 +24,9 @@ class Settings:
     invert_scroll: bool = False
     always_on_top: bool = False
     gaze_model: dict = field(default_factory=dict)   # from the gaze calibration
+    widgets_on: bool = True         # on-screen widgets while AirMouse runs (thumbs up / Ctrl+Alt+W toggle)
+    cursor_ring: bool = True        # ring around the cursor showing the gesture in progress
+    widgets: list = field(default_factory=list)      # the on-screen widgets (see onscreen.py)
 
     @property
     def zone_size(self):

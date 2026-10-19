@@ -1,6 +1,7 @@
 """Classic main window: standard Tkinter widgets with the Sun Valley theme (Windows 11 look)."""
 
 import ctypes
+import time
 import tkinter as tk
 from tkinter import ttk
 
@@ -78,6 +79,19 @@ class App(BaseApp):
         self.fps_var = tk.StringVar()
         ttk.Label(status, textvariable=self.fps_var, foreground=MUTED).pack(side="right")
 
+        # This run: frame rate over the last minute (a line), processor use, what was done.
+        self.session_slot = ttk.Frame(left)
+        self.session_slot.pack(fill="x")
+        self.session_box = ttk.LabelFrame(self.session_slot, text="Сеанс", padding=(12, 6))
+        self.session_chart = tk.Canvas(self.session_box, width=PREVIEW_W - 26, height=30, highlightthickness=0,
+                                       bg=PREVIEW_BG)
+        self.session_chart.pack(fill="x")
+        self.session_line = self.session_chart.create_line(0, 0, 0, 0, fill="#408cff", width=2, smooth=True)
+        self.session_top = tk.StringVar()
+        self.session_bottom = tk.StringVar()
+        ttk.Label(self.session_box, textvariable=self.session_top).pack(anchor="w", pady=(6, 0))
+        ttk.Label(self.session_box, textvariable=self.session_bottom, foreground=MUTED).pack(anchor="w")
+
         self.meter_slot = ttk.Frame(left)
         self.meter_slot.pack(fill="x")
         self.face_box = ttk.LabelFrame(self.meter_slot, text="Лицо", padding=(12, 6))
@@ -139,6 +153,9 @@ class App(BaseApp):
         self._slider(box, "Скорость прокрутки", "scroll_speed", 0.5, 6.0, lambda v: f"{v:.1f}×")
         self._check(box, "Обратная прокрутка", "invert_scroll")
         self._check(box, "Поверх всех окон", "always_on_top", self._set_always_on_top)
+        self.widgets_var = self._check(box, "Виджеты на экране (палец вверх, Ctrl+Alt+W)", "widgets_on")
+        self._check(box, "Кольцо у курсора", "cursor_ring")
+        ttk.Button(box, text="Настроить виджеты…", command=self.open_widget_editor).pack(fill="x", pady=(10, 0))
 
         design_row = ttk.Frame(box)
         design_row.pack(fill="x", pady=(10, 0))
@@ -186,6 +203,7 @@ class App(BaseApp):
                 self._schedule_save()
 
         ttk.Checkbutton(parent, text=title, variable=var, command=changed).pack(anchor="w", pady=(8, 0))
+        return var
 
     def _show_placeholder(self, text):
         self.canvas.itemconfigure(self.canvas_image, state="hidden")
@@ -221,6 +239,7 @@ class App(BaseApp):
             self.fps_var.set("")
             for bar in self.meters.values():
                 bar.configure(value=0)
+            self.session_box.pack_forget()
 
     def _show_control(self, on):
         self.control_var.set(on)
@@ -247,4 +266,26 @@ class App(BaseApp):
             face = self.face()
             for key, bar in self.meters.items():
                 bar.configure(value=meter_value(face, key) if face is not None else 0.0)
+            self._show_session()
+        if self.widgets_var.get() != self.settings.widgets_on:   # the thumbs up / Ctrl+Alt+W toggle it too
+            self.widgets_var.set(self.settings.widgets_on)
         self.after(33, self._tick)
+
+    def _show_session(self):
+        if self.session.started is None:
+            return
+        if not self.session_box.winfo_ismapped():
+            self.session_box.pack(fill="x", pady=(12, 0))
+        duration, fps, cpu, actions = self.session.summary(self.tracker, time.perf_counter())
+        self.session_top.set(f"{duration}   ·   {fps}   ·   {cpu}")
+        self.session_bottom.set(actions)
+        values = list(self.session.fps)
+        w, h = int(self.session_chart["width"]), int(self.session_chart["height"])
+        if len(values) > 1:
+            top = max(30.0, max(values))
+            step = (w - 4) / (self.session.fps.maxlen - 1)
+            start = w - 2 - step * (len(values) - 1)
+            coords = []
+            for i, v in enumerate(values):
+                coords += [start + i * step, h - 3 - (h - 6) * v / top]
+            self.session_chart.coords(self.session_line, *coords)

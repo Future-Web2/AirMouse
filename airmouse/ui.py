@@ -21,6 +21,8 @@ from .widgets import ACCENT, MUTED, TEXT, Button, Segmented, Slider, Stepper, To
 W, H = 1120, 840                         # logical size of the window
 SIDEBAR = (W - 16 - 376, 16, 376, H - 32)
 STATUS = (16, 16, 310, 50)
+WIDGETS_BUTTON = (338, 16, 150, 50)
+SESSION = (16, 80, 310, 118)
 CARD_W = 480
 FPS = 30          # window redraws per second while it is in front
 IDLE_FPS = 12     # ... while another window is active (mouse control is not affected)
@@ -110,10 +112,14 @@ class App(BaseApp):
         self.design = Segmented(x0 + cw - 196, 693, 196, 36, (("glass", "Стекло"), ("classic", "Классика")),
                                 st.design, lambda d: self.after(250, self._switch_design, d))
         self.calibrate_btn = Button(x0, 746, cw, 44, "", self._calibrate, size=15)
+        self.widgets_btn = Button(*WIDGETS_BUTTON, "Виджеты", self.open_widget_editor, size=15)
 
     def _widgets(self):
         return [self.segmented, self.start_btn, self.control_toggle, self.camera_stepper, *self.sliders,
-                self.invert_toggle, self.top_toggle, self.design, self.calibrate_btn]
+                self.invert_toggle, self.top_toggle, self.design, self.calibrate_btn, self.widgets_btn]
+
+    def scale(self):
+        return self.s
 
     # -- hooks ------------------------------------------------------------
 
@@ -151,6 +157,8 @@ class App(BaseApp):
 
         self._panel(frame, SIDEBAR, 32)
         self._draw_status(frame)
+        if self.tracker is not None and self.session.started is not None:
+            self._draw_session(frame, now)
         gestures = GESTURES[self.settings.mode]
         card_h = 52 + 24 * len(gestures)
         card_y = H - 16 - card_h
@@ -196,6 +204,27 @@ class App(BaseApp):
         capsule(frame, (x + 20) * self.s, (cy - 6) * self.s, 12 * self.s, 12 * self.s, color)
         self._text(frame, text, x + 42, cy, 16, weight="semibold")
         self._text(frame, fps, x + w - 20, cy, 13, MUTED, anchor="rm")
+
+    def _draw_session(self, frame, now):
+        """This run: how long, frame rate over the last minute, processor use, clicks and scrolling."""
+        s = self.s
+        x, y, w, h = SESSION
+        self._panel(frame, SESSION, 26)
+        duration, fps, cpu, actions = self.session.summary(self.tracker, now)
+        self._text(frame, "СЕАНС", x + 22, y + 24, 11, MUTED, "semibold")
+        self._text(frame, duration, x + w - 22, y + 24, 12, MUTED, anchor="rm")
+        values = list(self.session.fps)
+        if len(values) > 1:
+            top = max(30.0, max(values))
+            x0, x1, y0, y1 = x + 22, x + 186, y + 42, y + 74
+            step = (x1 - x0) / (self.session.fps.maxlen - 1)
+            start = x1 - step * (len(values) - 1)
+            line = np.array([[(start + i * step) * s * 16, (y1 - (y1 - y0) * v / top) * s * 16]
+                             for i, v in enumerate(values)], np.int32)
+            cv2.polylines(frame, [line], False, ACCENT, max(1, round(2 * s)), cv2.LINE_AA, 4)
+        self._text(frame, fps, x + w - 22, y + 50, 14, weight="semibold", anchor="rm")
+        self._text(frame, cpu, x + w - 22, y + 70, 12, MUTED, anchor="rm")
+        self._text(frame, actions, x + 22, y + 98, 12, MUTED)
 
     def _draw_gestures(self, frame, gestures, y, h):
         self._panel(frame, (16, y, CARD_W, h), 26)

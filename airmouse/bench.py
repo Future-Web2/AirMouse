@@ -143,6 +143,7 @@ def startup():
         "total_s": round(uptime(), 3),
         "mediapipe_loaded": "mediapipe" in sys.modules,
     }
+    app.onscreen.close()
     app.root.destroy()
     return result
 
@@ -168,8 +169,82 @@ def window(scale, frames=40):
         "camera_on": _timed(lambda: frame(True), frames),
     }
     screen.close()
+    app.onscreen.close()
     app.root.destroy()
     return result
+
+
+# -- on-screen widgets ----------------------------------------------------------------------
+
+class _WidgetEnv:
+    """What widgets ask of OnScreen, without windows: a camera picture and the real (read-only) system."""
+
+    def __init__(self, s):
+        import cv2
+
+        from . import system
+        from .glass import LiquidBackdrop
+        self.s = s
+        self.volume, self.load = system.Volume(), system.SystemLoad()
+        self.frame = cv2.resize(LiquidBackdrop(FRAME_W, FRAME_H, seed=11).render(0.5), (FRAME_W, FRAME_H))
+        self.frame_id = 0
+
+    def status(self):
+        return "Курсор", (94, 224, 122), f"{30 - self.frame_id % 2} кадр/с"
+
+    def cursor(self):
+        return 0, 0
+
+    def request(self, item):
+        pass
+
+    def changed(self):
+        pass
+
+    def place(self, widget):
+        pass
+
+    def clamp(self, widget, x, y):
+        return x, y
+
+
+def onscreen_widgets(scale=1.5, frames=30):
+    """Redrawing the widgets and the cursor ring, ready for the window (no window is shown).
+
+    The status widget redraws with every camera frame it shows (at most 15 a second),
+    the cursor ring whenever the gesture changes; the others about once a second or less.
+    """
+    from . import onscreen
+    env = _WidgetEnv(scale)
+    status = onscreen.StatusWidget({"type": "status", "on": True, "x": 0, "y": 0}, env)
+    clock = [0.0]
+
+    def status_frame():
+        clock[0] += 1 / 15
+        env.frame_id += 1
+        status.tick(clock[0])
+        status.render(clock[0]).bgra()
+
+    ring = onscreen.CursorRing(scale)
+    progress = [0.0]
+
+    def ring_frame():
+        progress[0] = (progress[0] + 0.07) % 1.0
+        ring.render(ring.state(onscreen.MOVE, progress[0], 0.0)).bgra()
+
+    everything = []
+    for spec in onscreen.default_widgets():
+        widget = onscreen.WIDGET_CLASSES[spec["type"]](dict(spec, x=0, y=0), env)
+        widget.tick(0.0)
+        everything.append(widget)
+    t = time.perf_counter()
+    for widget in everything:
+        widget.render(0.0).bgra()
+    return {
+        "status_with_camera": _timed(status_frame, frames),
+        "cursor_ring": _timed(ring_frame, frames),
+        "all_widgets_once_ms": round((time.perf_counter() - t) * 1000, 1),
+    }
 
 
 # -- tracking ---------------------------------------------------------------------------
@@ -233,16 +308,21 @@ def hand(ox, oy, pinch=0.0, pose="open"):
 
     pinch: how far the thumb tip has moved to the index tip (0 = open hand, 1 = touching).
     pose: "open"; "two" folds the ring and little fingers (scroll); "right" aims the
-    thumb between the index and middle tips (right click).
+    thumb between the index and middle tips (right click); "thumb" is a fist with
+    the thumb up (shows / hides the on-screen widgets).
     """
     mcp = {5: (ox - 50, oy + 5), 9: (ox, oy), 13: (ox + 50, oy + 5), 17: (ox + 95, oy + 15)}
-    folded = {13, 17} if pose == "two" else set()
+    folded = {13, 17} if pose == "two" else set(mcp) if pose == "thumb" else set()
     pts = [None] * 21
     pts[0] = (ox, oy + 100, 0.0)
     for i, (mx, my) in mcp.items():
         for k, off in enumerate((0, -30, -15, 10) if i in folded else (0, -40, -65, -90)):
             pts[i + k] = (mx, my + off, 0.0)
     pts[1], pts[2], pts[3] = (ox - 60, oy + 80, 0.0), (ox - 85, oy + 55, 0.0), (ox - 100, oy + 30, 0.0)
+    if pose == "thumb":
+        pts[1], pts[2], pts[3], pts[4] = ((ox - 55, oy + 75, 0.0), (ox - 72, oy + 35, 0.0),
+                                          (ox - 78, oy - 20, 0.0), (ox - 80, oy - 80, 0.0))
+        return pts
     if pose == "right":
         tip = ((pts[8][0] + pts[12][0]) / 2, pts[8][1] + 5)
     else:
@@ -382,7 +462,23 @@ def pinch_series(count=20, seed=4):
         sim.rest(int(rng.integers(18, 30)), ox, oy)
     actions = [a for _t, a, _c in sim.events]
     return {"pinches": count, "left": len(sim.presses()), "right": len(sim.presses("right")),
-            "scroll": sum(a[0] == "wheel" for a in actions)}
+            "scroll": sum(a[0] == "wheel" for a in actions), "widgets": actions.count(("widgets",))}
+
+
+def thumbs_up(seed=8):
+    """A thumbs up held for a second, three times: each must show / hide the widgets once, and nothing else."""
+    sim = HandSim(seed)
+    ox, oy = cam_for(960, 540)
+    sim.rest(30, ox, oy)
+    starts = []
+    for _ in range(3):
+        starts.append(sim.t)
+        sim.rest(30, ox, oy, pose="thumb")
+        sim.rest(20, ox, oy)
+    toggles = [t for t, action, _c in sim.events if action == ("widgets",)]
+    delays = [min((t - start for t in toggles if t > start), default=None) for start in starts]
+    return {"held": 3, "toggles": len(toggles), "other_actions": len(sim.events) - len(toggles),
+            "seconds_to_toggle": None if None in delays else round(max(delays), 2)}
 
 
 def double_click(seed=5):
@@ -434,6 +530,7 @@ def cursor_quality():
         "double_click": double_click(),
         "false_actions_per_min": false_actions(),
         "glitch_px": glitch(),
+        "thumbs_up": thumbs_up(),
     }
 
 
@@ -447,6 +544,7 @@ def run(out_path=None):
     report = {"startup": startup()}
     report["window_100"] = window(1.0)
     report["window_150"] = window(1.5)
+    report["widgets_150"] = onscreen_widgets(1.5)
     report["tracking"] = tracking()
     report["cursor"] = cursor_quality()
     text = json.dumps(report, indent=2, ensure_ascii=False)

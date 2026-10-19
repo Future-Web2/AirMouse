@@ -6,6 +6,7 @@ import sys
 import threading
 import time
 import types
+from collections import Counter, deque
 from functools import lru_cache
 
 import cv2
@@ -143,7 +144,8 @@ class Tracker:
     """Runs capture, tracking and gestures on a background thread.
 
     The UI reads `mode`, `fps`, `palm`, `face`, `error` and `take_preview()`;
-    it sets `control_enabled` to pause or resume mouse control.
+    it sets `control_enabled` to pause or resume mouse control. For the
+    on-screen widgets: `progress`, `stats`, `events` and `widget_toggles`.
     """
 
     def __init__(self, settings):
@@ -155,6 +157,11 @@ class Tracker:
         self.face = None      # face: (time, FaceFrame or None) of the newest frame
         self.fps = 0.0
         self.error = None
+        self.progress = 0.0               # how near the next click is (fingers closing, eyes shut), 0..1
+        self.stats = Counter()            # done this run: "left" and "right" clicks, "wheel" steps
+        self.events = deque(maxlen=32)    # (number, time, action) of clicks, presses and scroll steps
+        self.widget_toggles = 0           # thumbs-up gestures so far
+        self._event_number = 0
         self._preview = None
         self._recenter = False
         self._lock = threading.Lock()
@@ -235,11 +242,16 @@ class Tracker:
 
                 if self.control_enabled:
                     for action in engine.update(*observation, t, winmouse.cursor_pos()):
-                        mouse.do(action)
+                        if action[0] == "widgets":
+                            self.widget_toggles += 1
+                        else:
+                            mouse.do(action)
+                            self._note(action, t)
                 else:
                     for action in engine.release_all():
                         mouse.do(action)
                 self.mode = engine.mode
+                self.progress = engine.pinch if self.kind == "hand" else engine.progress
 
                 self._publish_preview(frame, pts, sw, sh)
                 dt = t - last_t
@@ -254,6 +266,18 @@ class Tracker:
                 landmarker.close()
             if cap is not None:
                 cap.release()
+
+    def _note(self, action, t):
+        """Count what was done and keep it for the cursor ring (which flashes on clicks)."""
+        kind = action[0]
+        if kind == "move":
+            return
+        if kind in ("click", "down"):
+            self.stats["right" if action[1] == "right" else "left"] += 1
+        elif kind == "wheel":
+            self.stats["wheel"] += 1
+        self._event_number += 1
+        self.events.append((self._event_number, t, action))
 
     def _publish_preview(self, frame, pts, screen_w, screen_h):
         h, w = frame.shape[:2]
