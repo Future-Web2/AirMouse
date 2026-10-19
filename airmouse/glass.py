@@ -19,6 +19,7 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
 LIGHT = (-0.55, -0.83)   # direction the light comes from: top left
+GRAY_WEIGHTS = (0.299, 0.587, 0.114)   # R, G, B share of the grey value (as cv2.COLOR_RGB2GRAY)
 
 STYLES = {
     # big panels with text on them: frosted and slightly dark, so text stays readable
@@ -112,8 +113,11 @@ class Glass:
             v = ((ys_ + self.pad + dy * k) + 0.5) / self.f - 0.5
             self._maps.append(cv2.convertMaps(u.astype(np.float32), v.astype(np.float32), cv2.CV_16SC2))
 
-        self._tints = {}
+        self._colors, self._tints = {}, {}
+        # Big shapes: where the mask is fully opaque the glass is copied, not blended.
+        self._solid, self._corners = _split(self.mask, radius)
         self.shadow = shadow
+        self._shadow_parts = self._sample_shadow = None
         if shadow:
             self._make_shadow(radius, opacity=shadow, blur=min(18.0, max(3.0, min(w, h) * 0.12)),
                               offset=min(10, max(2, h // 14)))
@@ -128,12 +132,32 @@ class Glass:
         self._shadow_keep = (1 - alpha).astype(np.float32)
         self._shadow_dark = alpha.astype(np.float32)
         self._black = np.zeros((*alpha.shape, 3), np.uint8)
+        if not self._solid or self.f == 1:
+            return
+        # The shadow under the opaque middle of the glass is only seen through the
+        # glass, blurred: darken the small background sample there instead of the
+        # whole frame, and draw the shadow on the frame only around the shape.
+        sh, sw = alpha.shape
+        h, w = self.h, self.w
+        self._shadow_parts = [(0, m, 0, sw), (m + h, sh, 0, sw), (m, m + h, 0, m), (m, m + h, m + w, sw)]
+        self._shadow_parts += [(m + y0, m + y1, m + x0, m + x1) for y0, y1, x0, x1 in self._corners]
+        cw, ch = self._crop_size
+        p = self.pad
+        keep = np.ones((ch, cw), np.float32)
+        for y0, y1, x0, x1 in self._solid:
+            keep[p + y0:p + y1, p + x0:p + x1] = self._shadow_keep[m + y0:m + y1, m + x0:m + x1]
+        keep = cv2.resize(keep, (cw // self.f, ch // self.f), interpolation=cv2.INTER_AREA)
+        self._sample_shadow = (np.zeros((*keep.shape, 3), np.uint8), keep, 1 - keep)
 
-    def draw_shadow(self, frame, x, y):
+    def draw_shadow(self, frame, x, y, parts=None):
+        """Drop shadow of the shape at (x, y); parts: only these (y0, y1, x0, x1) pieces of it."""
         if not self.shadow:
             return
         m = self.shadow_pad
-        blend(frame, int(round(x)) - m, int(round(y)) - m, self._black, self._shadow_keep, self._shadow_dark)
+        x, y = int(round(x)) - m, int(round(y)) - m
+        for y0, y1, x0, x1 in parts or ((0, self._black.shape[0], 0, self._black.shape[1]),):
+            blend(frame, x + x0, y + y0, self._black[y0:y1, x0:x1], self._shadow_keep[y0:y1, x0:x1],
+                  self._shadow_dark[y0:y1, x0:x1])
 
     def draw(self, frame, x, y, lift=0.0, tint_alpha=None, tint=None):
         """Composite the glass onto frame with its top-left corner at (x, y)."""
@@ -142,33 +166,73 @@ class Glass:
         if x >= fw or y >= fh or x + self.w <= 0 or y + self.h <= 0:
             return
         if self.shadow:
-            self.draw_shadow(frame, x, y)
+            self.draw_shadow(frame, x, y, self._shadow_parts)
         cw, ch = self._crop_size
         src = _crop(frame, x - self.pad, y - self.pad, cw, ch)
         if self.f > 1:
             src = cv2.resize(src, (cw // self.f, ch // self.f), interpolation=cv2.INTER_AREA)
+            if self._sample_shadow is not None:
+                black, keep, dark = self._sample_shadow
+                cv2.blendLinear(src, black, keep, dark, dst=src)
         if self.blur > 0.5:
             src = cv2.GaussianBlur(src, (0, 0), self.blur / self.f)
+        ta = self.tint_alpha if tint_alpha is None else tint_alpha
+        tint = tint or self.tint
         if len(self._maps) == 3:   # colour dispersion: red and blue bend a little differently
             channels = [cv2.extractChannel(cv2.remap(src, m1, m2, cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE), c)
                         for c, (m1, m2) in enumerate(self._maps)]
             glass = cv2.merge(channels)
+            # Small shapes: saturate the colour fringes after the split, as light would.
+            gray = cv2.cvtColor(cv2.cvtColor(glass, cv2.COLOR_RGB2GRAY), cv2.COLOR_GRAY2RGB)
+            glass = cv2.addWeighted(glass, self.saturation, gray, 1 - self.saturation, lift)
+            if ta > 0:
+                glass = cv2.addWeighted(glass, 1 - ta, self._tint_image(tint), ta, 0)
         else:
+            # Saturation, tint and lift are linear in the colour: apply them while the image is still small.
+            src = cv2.transform(src, self._color_matrix(lift, ta, tint))
             glass = cv2.remap(src, *self._maps[0], cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
+        cv2.add(glass, self._highlight, dst=glass)
+        if self._solid and x >= 0 and y >= 0 and x + self.w <= fw and y + self.h <= fh:
+            for y0, y1, x0, x1 in self._solid:
+                frame[y + y0:y + y1, x + x0:x + x1] = glass[y0:y1, x0:x1]
+            for y0, y1, x0, x1 in self._corners:
+                blend(frame, x + x0, y + y0, glass[y0:y1, x0:x1], self.mask_inv[y0:y1, x0:x1],
+                      self.mask[y0:y1, x0:x1])
+        else:
+            blend(frame, x, y, glass, self.mask_inv, self.mask)
 
-        gray = cv2.cvtColor(cv2.cvtColor(glass, cv2.COLOR_RGB2GRAY), cv2.COLOR_GRAY2RGB)
-        glass = cv2.addWeighted(glass, self.saturation, gray, 1 - self.saturation, lift)
-        ta = self.tint_alpha if tint_alpha is None else tint_alpha
-        if ta > 0:
-            glass = cv2.addWeighted(glass, 1 - ta, self._tint_image(tint or self.tint), ta, 0)
-        glass = cv2.add(glass, self._highlight)
-        blend(frame, x, y, glass, self.mask_inv, self.mask)
+    def _color_matrix(self, lift, tint_alpha, tint):
+        """3x4 matrix: saturation around the grey value, then mix in the tint, plus lift (brightness)."""
+        key = (lift, tint_alpha, tint)
+        m = self._colors.get(key)
+        if m is None:
+            if len(self._colors) > 64:   # tint_alpha animates while a knob is dragged
+                self._colors.clear()
+            s, keep = self.saturation, 1 - tint_alpha
+            m = np.zeros((3, 4), np.float32)
+            m[:, :3] = keep * (s * np.eye(3) + (1 - s) * np.array([GRAY_WEIGHTS]))
+            m[:, 3] = keep * lift + tint_alpha * np.array(tint, np.float32)
+            self._colors[key] = m
+        return m
 
     def _tint_image(self, color):
         img = self._tints.get(color)
         if img is None:
             img = self._tints[color] = np.full((self.h, self.w, 3), color, np.uint8)
         return img
+
+
+def _split(mask, radius):
+    """(solid, corners): rectangles (y0, y1, x0, x1) where the mask is fully opaque, and the
+    four corner squares where it is not; (None, None) for shapes too small to bother."""
+    h, w = mask.shape
+    c = int(math.ceil(radius)) + 1
+    if 2 * c >= min(w, h) or w * h < 4096:
+        return None, None
+    solid = [(c, h - c, 0, w), (0, c, c, w - c), (h - c, h, c, w - c)]
+    if any((mask[y0:y1, x0:x1] < 1).any() for y0, y1, x0, x1 in solid):
+        return None, None
+    return solid, [(0, c, 0, c), (0, c, w - c, w), (h - c, h, 0, c), (h - c, h, w - c, w)]
 
 
 def blend(frame, x, y, image, keep, add):
@@ -180,7 +244,8 @@ def blend(frame, x, y, image, keep, add):
         return
     sx, sy = x0 - x, y0 - y
     sl = (slice(sy, sy + y1 - y0), slice(sx, sx + x1 - x0))
-    frame[y0:y1, x0:x1] = cv2.blendLinear(frame[y0:y1, x0:x1], image[sl], keep[sl], add[sl])
+    region = frame[y0:y1, x0:x1]
+    cv2.blendLinear(region, image[sl], keep[sl], add[sl], dst=region)
 
 
 @lru_cache(maxsize=256)
@@ -203,7 +268,7 @@ class LiquidBackdrop:
 
     def __init__(self, w, h, seed=5, colors=None):
         self.w, self.h = w, h
-        lw, lh = max(w // 8, 8), max(h // 8, 8)
+        lw, lh = max(w // 16, 8), max(h // 16, 8)   # the blobs are huge and soft: a coarse grid is plenty
         ys, xs = np.mgrid[0:lh, 0:lw].astype(np.float32)
         self.aspect = h / w
         self.xs, self.ys = xs / lw, ys / lh * self.aspect
@@ -212,7 +277,8 @@ class LiquidBackdrop:
                        rng.uniform(0, 6.28), rng.uniform(0, 6.28), rng.uniform(0.16, 0.26))
                       for c in (colors or self.COLORS)]
 
-    def render(self, t):
+    def render(self, t, out=None):
+        """The backdrop at time t (seconds), w x h RGB; out: an image to draw into instead of a new one."""
         color = np.zeros((*self.xs.shape, 3), np.float32)
         weight = np.full(self.xs.shape, 1e-4, np.float32)
         for c, sx, sy, px, py, r in self.blobs:
@@ -225,7 +291,7 @@ class LiquidBackdrop:
         # brightness grows with how much blob is there.
         glow = (1 - np.exp(-weight * 1.6))[..., None] * 0.92
         img = (0.035, 0.04, 0.08) * (1 - glow) + color / weight[..., None] * glow
-        return cv2.resize((np.clip(img, 0, 1) * 255).astype(np.uint8), (self.w, self.h),
+        return cv2.resize((np.clip(img, 0, 1) * 255).astype(np.uint8), (self.w, self.h), dst=out,
                           interpolation=cv2.INTER_CUBIC)
 
 

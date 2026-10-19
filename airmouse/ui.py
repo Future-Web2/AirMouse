@@ -11,9 +11,10 @@ import time
 import tkinter as tk
 
 import cv2
-from PIL import Image, ImageTk
+import numpy as np
 
 from .app_base import CALIBRATE_TEXT, GESTURES, METERS, MODES, BaseApp, meter_value
+from .blit import Blitter
 from .glass import ICON_CAMERA, LiquidBackdrop, blit_text, capsule, shape
 from .widgets import ACCENT, MUTED, TEXT, Button, Segmented, Slider, Stepper, Toggle
 
@@ -50,21 +51,25 @@ class App(BaseApp):
         # Display scale (100%, 125%, 150%, ...), rounded so odd DPI values do not blur the image.
         self.s = s = scale or max(round(self.root.winfo_fpixels("1i") / 96.0 * 4) / 4, 1.0)
         self.size = (round(W * s), round(H * s))
-        self.canvas = tk.Canvas(self.root, width=self.size[0], height=self.size[1], highlightthickness=0,
-                                bd=0, bg="#0c0e16")
-        self.canvas.pack()
-        self.photo = ImageTk.PhotoImage(Image.new("RGB", self.size))
-        self.canvas.create_image(0, 0, anchor="nw", image=self.photo)
-        self.canvas.bind("<Motion>", self._on_motion)
-        self.canvas.bind("<Leave>", lambda _e: self._set_hover(None))
-        self.canvas.bind("<ButtonPress-1>", self._on_press)
-        self.canvas.bind("<B1-Motion>", self._on_drag)
-        self.canvas.bind("<ButtonRelease-1>", self._on_release)
+        # The window image is drawn straight into this frame (see blit.py);
+        # with no background Tk never paints over it.
+        self.view = tk.Frame(self.root, width=self.size[0], height=self.size[1], background="",
+                             highlightthickness=0, bd=0)
+        self.view.pack()
+        self.view.bind("<Motion>", self._on_motion)
+        self.view.bind("<Leave>", lambda _e: self._set_hover(None))
+        self.view.bind("<ButtonPress-1>", self._on_press)
+        self.view.bind("<B1-Motion>", self._on_drag)
+        self.view.bind("<ButtonRelease-1>", self._on_release)
+        self.view.bind("<Expose>", lambda _e: self.blitter.repaint())
+        self._image = np.zeros((self.size[1], self.size[0], 3), np.uint8)   # the window, redrawn every frame
+        self._cover_image = np.zeros_like(self._image)                     # the camera, scaled to the window
 
         self.backdrop = LiquidBackdrop(*self.size)
         self._build()
         self._apply_mode()
         self.root.update_idletasks()
+        self.blitter = Blitter(self.view.winfo_id(), *self.size)
         _style_title_bar(self.root)
         self._t0 = self._last = time.perf_counter()
         self.after(1, self._tick)
@@ -138,7 +143,11 @@ class App(BaseApp):
         s = self.s
         for widget in self._widgets():
             widget.tick(dt)
-        frame = self._camera_bg.copy() if self._camera_bg is not None else self.backdrop.render(now - self._t0)
+        frame = self._image
+        if self._camera_bg is not None:
+            np.copyto(frame, self._camera_bg)
+        else:
+            self.backdrop.render(now - self._t0, out=frame)
 
         self._panel(frame, SIDEBAR, 32)
         self._draw_status(frame)
@@ -233,7 +242,7 @@ class App(BaseApp):
     def _set_hover(self, widget):
         for w in self._widgets():
             w.hover = w is widget
-        self.canvas.configure(cursor="hand2" if widget is not None and widget.enabled else "")
+        self.view.configure(cursor="hand2" if widget is not None and widget.enabled else "")
 
     def _on_motion(self, event):
         if self._captured is None:
@@ -265,7 +274,7 @@ class App(BaseApp):
         if self.next_design is not None:
             return  # the window is closing for a design switch
         if self.root.state() != "iconic":
-            self.photo.paste(Image.fromarray(self.render(start, dt)))
+            self.blitter.show(self.render(start, dt))
         hwnd = ctypes.windll.user32.GetParent(self.root.winfo_id())
         in_front = ctypes.windll.user32.GetForegroundWindow() == hwnd
         spent = time.perf_counter() - start
@@ -277,6 +286,10 @@ class App(BaseApp):
         tw, th = self.size
         k = max(tw / fw, th / fh)
         rw, rh = math.ceil(fw * k), math.ceil(fh * k)
-        big = cv2.resize(frame, (rw, rh), interpolation=cv2.INTER_LINEAR)
+        dim = cv2.convertScaleAbs(frame, alpha=0.9)   # on the small image: same result, a fraction of the work
+        if (rw, rh) == (tw, th):   # the usual case: a 4:3 camera fills the 4:3 window exactly
+            return cv2.resize(dim, (tw, th), dst=self._cover_image, interpolation=cv2.INTER_LINEAR)
+        big = cv2.resize(dim, (rw, rh), interpolation=cv2.INTER_LINEAR)
         x, y = (rw - tw) // 2, (rh - th) // 2
-        return cv2.convertScaleAbs(big[y:y + th, x:x + tw], alpha=0.9)
+        np.copyto(self._cover_image, big[y:y + th, x:x + tw])
+        return self._cover_image
