@@ -105,6 +105,43 @@ class BackdropTest(unittest.TestCase):
         self.assertIs(backdrop.render(2.0, out=out), out)
         self.assertGreater(out.mean(), 10)
 
+    def test_glints_add_light(self):
+        plain = LiquidBackdrop(320, 240, seed=9).render(1.0)
+        sunlit = LiquidBackdrop(320, 240, seed=9, glints=1.0).render(1.0)
+        self.assertGreater(sunlit.mean(), plain.mean() + 1)
+
+
+class FogTest(unittest.TestCase):
+    """«Природа»: fogged glass with condensation."""
+
+    def test_condensation_maps(self):
+        light, dark = glass.condensation(300, 200, 1.0, seed=3)
+        again, _ = glass.condensation(300, 200, 1.0, seed=3)
+        np.testing.assert_array_equal(light, again)                     # the same drops every time
+        for layer in (light, dark):
+            self.assertEqual((layer.shape, layer.dtype), ((200, 300), np.float32))
+            self.assertTrue(0.0 <= layer.min() and layer.max() <= 1.0)
+        self.assertGreater(float((light > 0.5).sum()), 20)              # glints
+        self.assertGreater(float((dark > 0.05).sum()), 200)             # clear drop bodies, trails
+
+    def test_fogged_panel_is_milkier_with_drops(self):
+        clear, fogged = background(), background()
+        dark_bg = np.full_like(clear, 20)
+        Glass(400, 300, 40, **STYLES["panel"]).draw(clear, 100, 100)
+        Glass(400, 300, 40, **STYLES["fog_panel"]).draw(fogged, 100, 100)
+        self.assertFalse(np.array_equal(clear, fogged))
+        a, b = dark_bg.copy(), dark_bg.copy()
+        Glass(400, 300, 40, **STYLES["panel"]).draw(a, 100, 100)
+        Glass(400, 300, 40, **STYLES["fog_panel"]).draw(b, 100, 100)
+        self.assertGreater(b[150:350, 150:450].mean(), a[150:350, 150:450].mean() + 5)   # the haze lightens
+
+    def test_every_design_style_exists(self):
+        from airmouse.ui import THEMES
+        for theme in THEMES.values():
+            for name in theme["styles"].values():
+                self.assertIn(name, STYLES)
+            Glass(120, 50, 25, **STYLES[theme["styles"].get("accent", "accent")])
+
 
 if __name__ == "__main__":
     unittest.main()

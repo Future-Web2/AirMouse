@@ -13,6 +13,19 @@ TEXT = (245, 247, 250)
 MUTED = (178, 186, 200)
 DIM = (120, 126, 140)
 
+# The window's design sets this (ui.App): the accent colour, the switch track
+# when off, and which glass style each kind of control uses.
+THEME = {"accent": ACCENT, "track": (78, 84, 98), "styles": {}}
+
+
+def set_theme(theme):
+    THEME.update(theme)
+
+
+def style(name):
+    """The glass style for a kind of control ("panel", "button", "accent", "pill", "knob"...) in this design."""
+    return THEME["styles"].get(name, name)
+
 
 class Widget:
     def __init__(self, x, y, w, h):
@@ -54,7 +67,7 @@ class Button(Widget):
     def draw(self, frame, s):
         x, y, w, h = self.rect
         k = 0.97 if self.pressed else 1.0
-        g = shape(q(w * k * s), q(h * k * s), q(h * k * s / 2), self.style)
+        g = shape(q(w * k * s), q(h * k * s), q(h * k * s / 2), style(self.style))
         g.draw(frame, (x + w / 2) * s - g.w / 2, (y + h / 2) * s - g.h / 2, lift=16 if self.hover else 0)
         blit_text(frame, self.label, (x + w / 2) * s, (y + h / 2) * s, "semibold", self.size * s,
                   TEXT if self.enabled else DIM, "mm")
@@ -103,7 +116,7 @@ class Segmented(Widget):
         stretch = min(0.35, abs(self.vel) * 0.09)
         iw, ih = seg * (1 + stretch), (h - 2 * inset) * (1 - stretch * 0.3)
         cx, cy = x + inset + (self.pos + 0.5) * seg, y + h / 2
-        g = shape(q(iw * s), q(ih * s), q(ih * s / 2), "pill")
+        g = shape(q(iw * s), q(ih * s), q(ih * s / 2), style("pill"))
         g.draw(frame, cx * s - g.w / 2, cy * s - g.h / 2, lift=10 if self.hover else 0)
         for i, (_key, label) in enumerate(self.options):
             blit_text(frame, label, (x + inset + (i + 0.5) * seg) * s, cy * s, "semibold", 15 * s,
@@ -133,12 +146,12 @@ class Toggle(Widget):
     def draw(self, frame, s):
         x, y, w, h = self.rect
         e = ease(self.t)
-        track = tuple(a + (b - a) * e for a, b in zip((78, 84, 98), ACCENT))
+        track = tuple(a + (b - a) * e for a, b in zip(THEME["track"], THEME["accent"]))
         capsule(frame, x * s, y * s, w * s, h * s, track)
         kh = h - 6
         kw = kh * (1.3 if self.pressed else 1.0)   # the knob stretches while held
         kx = x + 3 + e * (w - 6 - kw)
-        g = shape(q(kw * s), q(kh * s), q(kh * s / 2), "knob")
+        g = shape(q(kw * s), q(kh * s), q(kh * s / 2), style("knob"))
         g.draw(frame, kx * s, (y + 3) * s, tint_alpha=0.55 if self.pressed else 0.92)
 
 
@@ -182,11 +195,11 @@ class Slider(Widget):
         tx, ty, tl = self._track()
         k = (self.value - self.lo) / (self.hi - self.lo)
         capsule(frame, tx * s, (ty - 3) * s, tl * s, 6 * s, (255, 255, 255), alpha=0.16)
-        capsule(frame, tx * s, (ty - 3) * s, max(6, k * tl) * s, 6 * s, ACCENT)
+        capsule(frame, tx * s, (ty - 3) * s, max(6, k * tl) * s, 6 * s, THEME["accent"])
         e = ease(self.grow)
         kh = 22 + 12 * e
         kw = kh * (1 + 0.3 * e)
-        g = shape(q(kw * s), q(kh * s), q(kh * s / 2), "knob")
+        g = shape(q(kw * s), q(kh * s), q(kh * s / 2), style("knob"))
         g.draw(frame, (tx + k * tl) * s - g.w / 2, ty * s - g.h / 2, tint_alpha=0.92 - 0.8 * e)
 
 

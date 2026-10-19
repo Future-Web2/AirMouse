@@ -17,7 +17,7 @@ from . import tuning
 from .app_base import CALIBRATE_TEXT, GESTURES, METERS, MODES, BaseApp, meter_value
 from .blit import Blitter
 from .glass import ICON_CAMERA, LiquidBackdrop, blit_text, capsule, shape
-from .widgets import ACCENT, MUTED, TEXT, Button, Segmented, Slider, Stepper, Toggle
+from .widgets import MUTED, TEXT, Button, Segmented, Slider, Stepper, Toggle, set_theme, style
 
 W, H = 1120, 840                         # logical size of the window
 SIDEBAR = (W - 16 - 376, 16, 376, H - 32)
@@ -28,13 +28,28 @@ SESSION = (16, 80, 310, 118)
 CARD_W = 480
 IDLE_FPS = 12     # window redraws per second while another window is active (in front: «Частота окна»)
 
+# Two looks of the same window: clear liquid glass over violet light, and «Природа»,
+# fogged glass with drops of condensation over a deep green, sunlit backdrop.
+THEMES = {
+    "glass": {"accent": (64, 140, 255), "track": (78, 84, 98), "styles": {}, "backdrop": {},
+              "caption": 0x00160E0C},
+    "nature": {"accent": (88, 200, 122), "track": (70, 92, 78),
+               "styles": {kind: "fog_" + kind for kind in ("panel", "button", "accent", "danger", "pill", "knob")},
+               "backdrop": {"colors": ((0.10, 0.42, 0.22), (0.36, 0.55, 0.16), (0.05, 0.46, 0.40),
+                                       (0.55, 0.78, 0.30), (0.90, 0.78, 0.36)),
+                            "base": (0.02, 0.05, 0.035), "glints": 1.0},
+               "caption": 0x00182214,
+               # the on-screen widgets cannot blur what is behind them: milky green with condensation
+               "widgets": {"color": (34, 50, 40), "opacity": 0.84, "droplets": 0.9}},
+}
 
-def _style_title_bar(window):
-    """Dark title bar in the colour of the window."""
+
+def _style_title_bar(window, color=0x00160E0C):
+    """Dark title bar in the colour of the window (color: 0x00BBGGRR)."""
     try:
         hwnd = ctypes.windll.user32.GetParent(window.winfo_id())
         dwm = ctypes.windll.dwmapi
-        for attribute, value in ((20, 1), (35, 0x00160E0C), (34, 0x00160E0C)):  # dark mode, caption, border
+        for attribute, value in ((20, 1), (35, color), (34, color)):  # dark mode, caption, border
             v = ctypes.c_int(value)
             dwm.DwmSetWindowAttribute(hwnd, attribute, ctypes.byref(v), ctypes.sizeof(v))
     except (AttributeError, OSError):
@@ -49,6 +64,8 @@ class App(BaseApp):
     def __init__(self, autostart=False, scale=None):
         """scale: display scale; normally taken from Windows (the promo video passes its own)."""
         super().__init__(autostart)
+        self.theme = THEMES["nature" if self.settings.design == "nature" else "glass"]
+        set_theme(self.theme)
         self._camera_bg = None
         self._captured = None
         # Display scale (100%, 125%, 150%, ...), rounded so odd DPI values do not blur the image.
@@ -68,12 +85,12 @@ class App(BaseApp):
         self._image = np.zeros((self.size[1], self.size[0], 3), np.uint8)   # the window, redrawn every frame
         self._cover_image = np.zeros_like(self._image)                     # the camera, scaled to the window
 
-        self.backdrop = LiquidBackdrop(*self.size)
+        self.backdrop = LiquidBackdrop(*self.size, **self.theme["backdrop"])
         self._build()
         self._apply_mode()
         self.root.update_idletasks()
         self.blitter = Blitter(self.view.winfo_id(), *self.size)
-        _style_title_bar(self.root)
+        _style_title_bar(self.root, self.theme["caption"])
         self._t0 = self._last = time.perf_counter()
         self.after(1, self._tick)
         self._ready()
@@ -110,7 +127,8 @@ class App(BaseApp):
         self.invert_toggle = Toggle(x0 + cw - 52, 616, st.invert_scroll, setter("invert_scroll"))
         self.top_toggle = Toggle(x0 + cw - 52, 656, st.always_on_top, self._set_always_on_top)
         # Switching design reopens the window; let the pill slide first.
-        self.design = Segmented(x0 + cw - 196, 693, 196, 36, (("glass", "Стекло"), ("classic", "Классика")),
+        self.design = Segmented(x0 + cw - 264, 693, 264, 36,
+                                (("glass", "Стекло"), ("nature", "Природа"), ("classic", "Классика")),
                                 st.design, lambda d: self.after(250, self._switch_design, d))
         self.calibrate_btn = Button(x0, 746, cw, 44, "", self._calibrate, size=15)
         self.widgets_btn = Button(*WIDGETS_BUTTON, "Виджеты", self.open_widget_editor, size=15)
@@ -178,7 +196,7 @@ class App(BaseApp):
     def _panel(self, frame, rect, radius):
         x, y, w, h = rect
         s = self.s
-        shape(round(w * s), round(h * s), round(radius * s), "panel").draw(frame, x * s, y * s)
+        shape(round(w * s), round(h * s), round(radius * s), style("panel")).draw(frame, x * s, y * s)
 
     def _text(self, frame, text, x, y, size, color=TEXT, weight="regular", anchor="lm"):
         blit_text(frame, text, x * self.s, y * self.s, weight, size * self.s, color, anchor)
@@ -224,7 +242,7 @@ class App(BaseApp):
             start = x1 - step * (len(values) - 1)
             line = np.array([[(start + i * step) * s * 16, (y1 - (y1 - y0) * v / top) * s * 16]
                              for i, v in enumerate(values)], np.int32)
-            cv2.polylines(frame, [line], False, ACCENT, max(1, round(2 * s)), cv2.LINE_AA, 4)
+            cv2.polylines(frame, [line], False, self.theme["accent"], max(1, round(2 * s)), cv2.LINE_AA, 4)
         self._text(frame, fps, x + w - 22, y + 50, 14, weight="semibold", anchor="rm")
         self._text(frame, cpu, x + w - 22, y + 70, 12, MUTED, anchor="rm")
         self._text(frame, actions, x + 22, y + 98, 12, MUTED)
@@ -250,7 +268,7 @@ class App(BaseApp):
             bx = lx + 98
             capsule(frame, bx * s, (ly - 3) * s, 100 * s, 6 * s, (255, 255, 255), alpha=0.16)
             if value > 0.02:
-                capsule(frame, bx * s, (ly - 3) * s, max(6, 100 * value) * s, 6 * s, ACCENT)
+                capsule(frame, bx * s, (ly - 3) * s, max(6, 100 * value) * s, 6 * s, self.theme["accent"])
 
     def _draw_placeholder(self, frame):
         cx, cy = SIDEBAR[0] / 2, H / 2 - 30

@@ -38,7 +38,61 @@ STYLES = {
     # switch and slider knobs: white at rest, a clear lens while dragged (tint_alpha set when drawing)
     "knob": dict(blur=0, refraction=2.2, dispersion=0.35, tint=(255, 255, 255), tint_alpha=0.92,
                  saturation=1.5, rim=1.2, sheen=0.10, shadow=0.35),
+
+    # «Природа»: fogged glass — heavy blur, a milky haze, muted colours, drops of condensation
+    "fog_panel": dict(blur=26, refraction=0.6, tint=(16, 32, 23), tint_alpha=0.5, saturation=0.8, rim=0.75,
+                      sheen=0.12, shadow=0.3, haze=0.16, droplets=1.0),
+    "fog_button": dict(blur=9, refraction=0.9, tint=(222, 238, 226), tint_alpha=0.14, saturation=0.9, rim=0.9,
+                       sheen=0.14, haze=0.10, droplets=0.7),
+    "fog_accent": dict(blur=9, refraction=0.9, tint=(46, 142, 84), tint_alpha=0.66, saturation=1.0, rim=1.0,
+                       sheen=0.16, haze=0.06, droplets=0.5),
+    "fog_danger": dict(blur=9, refraction=0.9, tint=(196, 86, 58), tint_alpha=0.62, saturation=1.0, rim=1.0,
+                       sheen=0.16, haze=0.06, droplets=0.5),
+    "fog_pill": dict(blur=3, refraction=1.4, dispersion=0.1, tint=(232, 244, 234), tint_alpha=0.2, saturation=1.0,
+                     rim=1.2, sheen=0.12, haze=0.08),
+    "fog_knob": dict(blur=0, refraction=2.0, dispersion=0.2, tint=(244, 250, 244), tint_alpha=0.92, saturation=1.2,
+                     rim=1.1, sheen=0.10, shadow=0.35),
 }
+
+
+def condensation(w, h, amount, seed):
+    """(light, dark): drops of condensation on fogged glass, as brightness to add and to take away (0..1).
+
+    A drop is clearer than the mist around it (a little darker), works as a tiny
+    lens that gathers light on its lower edge, and has a glint on its upper left
+    (the light comes from the top left). A few drops have run down and cleared a
+    path through the mist. Fine specks of mist in between.
+    """
+    rng = np.random.default_rng(seed)
+    light = np.zeros((h, w), np.uint8)
+    dark = np.zeros((h, w), np.uint8)
+    S = 16   # sub-pixel precision for OpenCV drawing
+
+    def point(x, y):
+        return int(x * S), int(y * S)
+
+    def drop(x, y, r):
+        cv2.circle(dark, point(x, y), int(r * S), 22, -1, cv2.LINE_AA, 4)
+        edge = max(1, int(round(0.32 * r)))
+        cv2.ellipse(light, point(x, y), (int(0.78 * r * S), int(0.78 * r * S)), 0, 15, 165, 70, edge, cv2.LINE_AA, 4)
+        cv2.circle(light, point(x - 0.36 * r, y - 0.4 * r), max(int(0.3 * r * S), 7), 235, -1, cv2.LINE_AA, 4)
+
+    trails = np.zeros((h, w), np.uint8)
+    for _ in range(max(1, int(amount * w * h / 120000))):
+        x, y0 = rng.uniform(0.06 * w, 0.94 * w), rng.uniform(0.0, 0.5 * h)
+        y1 = min(h - 7.0, y0 + rng.uniform(0.12, 0.32) * h)
+        wobble = rng.uniform(-2.5, 2.5)
+        cv2.line(trails, point(x, y0), point(x + wobble, y1), 9, 5, cv2.LINE_AA, 4)
+        cv2.line(light, point(x + 2.4, y0 + 4), point(x + 2.4 + wobble, y1), 14, 1, cv2.LINE_AA, 4)
+        drop(x + wobble, y1, rng.uniform(3.2, 5.0))
+    dark = cv2.add(dark, cv2.GaussianBlur(trails, (0, 0), 1.2))   # a cleared path has soft edges
+    for _ in range(int(amount * w * h / 4200)):
+        roll = rng.random()
+        r = rng.uniform(1.3, 2.4) if roll < 0.68 else rng.uniform(2.4, 4.2) if roll < 0.95 else rng.uniform(4.2, 6.5)
+        drop(rng.uniform(r, w - r), rng.uniform(r, h - r), r)
+    specks = rng.random((h, w)) < 0.004 * amount
+    light[specks] = np.maximum(light[specks], 26)
+    return light.astype(np.float32) / 255, dark.astype(np.float32) / 255
 
 
 def rounded_rect_sdf(w, h, r, pad=0):
@@ -70,10 +124,12 @@ class Glass:
     """One glass shape of a fixed size; draw it anywhere, any number of times."""
 
     def __init__(self, w, h, radius, *, blur=10.0, refraction=1.0, dispersion=0.0, tint=(255, 255, 255),
-                 tint_alpha=0.1, saturation=1.3, rim=1.0, sheen=0.08, shadow=0.0):
+                 tint_alpha=0.1, saturation=1.3, rim=1.0, sheen=0.08, shadow=0.0, haze=0.0, droplets=0.0):
+        """haze: a milky white veil over the glass (fog); droplets: how much condensation sits on it."""
         self.w, self.h = w, h = max(int(round(w)), 2), max(int(round(h)), 2)
         radius = min(radius, w / 2, h / 2)
         self.blur, self.tint, self.tint_alpha, self.saturation = blur, tint, tint_alpha, saturation
+        self.haze = haze
 
         d = rounded_rect_sdf(w, h, radius)
         self.mask = np.clip(0.5 - d, 0, 1).astype(np.float32)
@@ -98,6 +154,12 @@ class Glass:
         ys = np.arange(h, dtype=np.float32)[:, None] / h
         top_sheen = sheen * np.clip(1 - ys / 0.5, 0, 1) ** 2
         highlight = ((line * 0.75 + glow) * light * rim + top_sheen) * self.mask
+        self._dark = None
+        if droplets:
+            drops_light, drops_dark = condensation(w, h, droplets, seed=w * 7919 + h)
+            highlight += drops_light * self.mask
+            self._dark = cv2.cvtColor(np.clip(drops_dark * self.mask * 255, 0, 255).astype(np.uint8),
+                                      cv2.COLOR_GRAY2RGB)
         self._highlight = cv2.cvtColor(np.clip(highlight * 255, 0, 255).astype(np.uint8), cv2.COLOR_GRAY2RGB)
 
         # Where to sample the (downscaled, blurred) background for each output pixel.
@@ -187,11 +249,15 @@ class Glass:
             glass = cv2.addWeighted(glass, self.saturation, gray, 1 - self.saturation, lift)
             if ta > 0:
                 glass = cv2.addWeighted(glass, 1 - ta, self._tint_image(tint), ta, 0)
+            if self.haze:
+                glass = cv2.addWeighted(glass, 1 - self.haze, self._tint_image((255, 255, 255)), self.haze, 0)
         else:
-            # Saturation, tint and lift are linear in the colour: apply them while the image is still small.
+            # Saturation, tint, haze and lift are linear in the colour: apply them while the image is still small.
             src = cv2.transform(src, self._color_matrix(lift, ta, tint))
             glass = cv2.remap(src, *self._maps[0], cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
         cv2.add(glass, self._highlight, dst=glass)
+        if self._dark is not None:   # the shaded side of the drops of condensation
+            cv2.subtract(glass, self._dark, dst=glass)
         if self._solid and x >= 0 and y >= 0 and x + self.w <= fw and y + self.h <= fh:
             for y0, y1, x0, x1 in self._solid:
                 frame[y + y0:y + y1, x + x0:x + x1] = glass[y0:y1, x0:x1]
@@ -202,7 +268,8 @@ class Glass:
             blend(frame, x, y, glass, self.mask_inv, self.mask)
 
     def _color_matrix(self, lift, tint_alpha, tint):
-        """3x4 matrix: saturation around the grey value, then mix in the tint, plus lift (brightness)."""
+        """3x4 matrix: saturation around the grey value, then mix in the tint, plus lift (brightness),
+        then the haze (a veil of white)."""
         key = (lift, tint_alpha, tint)
         m = self._colors.get(key)
         if m is None:
@@ -212,6 +279,9 @@ class Glass:
             m = np.zeros((3, 4), np.float32)
             m[:, :3] = keep * (s * np.eye(3) + (1 - s) * np.array([GRAY_WEIGHTS]))
             m[:, 3] = keep * lift + tint_alpha * np.array(tint, np.float32)
+            if self.haze:
+                m *= 1 - self.haze
+                m[:, 3] += self.haze * 255
             self._colors[key] = m
         return m
 
@@ -261,12 +331,29 @@ def q(v):
 
 # -- background -----------------------------------------------------------
 
+def _glints(w, h, seed):
+    """Soft discs of light, like sun through leaves out of focus (RGB, to add to a picture)."""
+    rng = np.random.default_rng(seed + 1)
+    image = np.zeros((h, w, 3), np.uint8)
+    for _ in range(26):
+        r = rng.uniform(0.015, 0.06) * w
+        x, y = rng.uniform(0, w), rng.uniform(0, h)
+        tone = (255, 236, 170) if rng.random() < 0.6 else (196, 255, 186)
+        k = rng.uniform(0.18, 0.45)
+        cv2.circle(image, (int(x * 16), int(y * 16)), int(r * 16), tuple(int(c * k) for c in tone), -1, cv2.LINE_AA, 4)
+    return cv2.GaussianBlur(image, (0, 0), max(1.0, 0.006 * w))
+
+
 class LiquidBackdrop:
-    """Slowly flowing colour blobs on a dark base: the 'wallpaper' behind the glass."""
+    """Slowly flowing colour blobs on a dark base: the 'wallpaper' behind the glass.
+
+    glints: soft out-of-focus discs of light on top (the «Природа» design), gently breathing.
+    """
 
     COLORS = ((0.25, 0.43, 1.0), (0.66, 0.31, 1.0), (0.0, 0.78, 0.86), (1.0, 0.35, 0.63), (0.85, 0.3, 0.95))
+    BASE = (0.035, 0.04, 0.08)
 
-    def __init__(self, w, h, seed=5, colors=None):
+    def __init__(self, w, h, seed=5, colors=None, base=None, glints=0.0):
         self.w, self.h = w, h
         lw, lh = max(w // 16, 8), max(h // 16, 8)   # the blobs are huge and soft: a coarse grid is plenty
         ys, xs = np.mgrid[0:lh, 0:lw].astype(np.float32)
@@ -276,6 +363,9 @@ class LiquidBackdrop:
         self.blobs = [(np.array(c, np.float32), rng.uniform(0.12, 0.3), rng.uniform(0.1, 0.25),
                        rng.uniform(0, 6.28), rng.uniform(0, 6.28), rng.uniform(0.16, 0.26))
                       for c in (colors or self.COLORS)]
+        self.base = base or self.BASE
+        self.glints = glints
+        self._glints = _glints(w, h, seed) if glints else None
 
     def render(self, t, out=None):
         """The backdrop at time t (seconds), w x h RGB; out: an image to draw into instead of a new one."""
@@ -290,9 +380,12 @@ class LiquidBackdrop:
         # Colours blend by weight (staying saturated where blobs overlap);
         # brightness grows with how much blob is there.
         glow = (1 - np.exp(-weight * 1.6))[..., None] * 0.92
-        img = (0.035, 0.04, 0.08) * (1 - glow) + color / weight[..., None] * glow
-        return cv2.resize((np.clip(img, 0, 1) * 255).astype(np.uint8), (self.w, self.h), dst=out,
-                          interpolation=cv2.INTER_CUBIC)
+        img = self.base * (1 - glow) + color / weight[..., None] * glow
+        out = cv2.resize((np.clip(img, 0, 1) * 255).astype(np.uint8), (self.w, self.h), dst=out,
+                         interpolation=cv2.INTER_CUBIC)
+        if self._glints is not None:
+            cv2.addWeighted(out, 1.0, self._glints, self.glints * (0.8 + 0.2 * math.sin(t * 0.7)), 0, dst=out)
+        return out
 
 
 # -- text and flat shapes ---------------------------------------------------

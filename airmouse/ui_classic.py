@@ -168,7 +168,7 @@ class App(BaseApp):
         ttk.Label(design_row, text="Дизайн").pack(side="left")
         names = dict(DESIGNS)
         self.design_var = tk.StringVar(value=names[self.settings.design])
-        design = ttk.Combobox(design_row, textvariable=self.design_var, values=list(names.values()), width=14,
+        design = ttk.Combobox(design_row, textvariable=self.design_var, values=list(names.values()), width=26,
                               state="readonly")
         design.pack(side="right")
         design.bind("<<ComboboxSelected>>", lambda _e: self._switch_design(

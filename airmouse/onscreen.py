@@ -25,7 +25,8 @@ from datetime import datetime
 from . import system, tuning, winmouse
 from .face import EYES_CLOSED, NO_FACE
 from .gestures import DRAG, MOVE, NO_HAND, PENDING, PRESSED, RIGHT, SCROLL
-from .overlay import Layer, LayeredWindow, cursor_pos
+from .glass import condensation
+from .overlay import Layer, LayeredWindow, cursor_pos, round_mask
 
 TEXT = (245, 247, 250)
 MUTED = (170, 178, 192)
@@ -228,7 +229,15 @@ class Widget:
         if self._base is None or (self._base.w, self._base.h) != (w, h):
             base = Layer(w, h)
             pw, ph = self.panel_size()
-            base.panel(self.m, self.m, pw, ph, 18 * self.s, blur=5 * self.s, offset=3 * self.s)
+            look = getattr(self.env, "look", None) or {}
+            radius = round(18 * self.s)
+            base.panel(self.m, self.m, pw, ph, radius, color=look.get("color", (16, 18, 28)),
+                       opacity=look.get("opacity", 0.86), blur=5 * self.s, offset=3 * self.s)
+            if look.get("droplets"):          # «Природа»: condensation on the glass
+                light, dark = condensation(pw, ph, look["droplets"], seed=pw * 31 + ph)
+                inside = round_mask(pw, ph, radius)
+                base.paint(self.m, self.m, dark * inside, (0, 0, 0))
+                base.paint(self.m, self.m, light * inside, (255, 255, 255))
             self.draw_static(base)
             self._base = base
         layer = self._base.copy()
@@ -246,6 +255,10 @@ class Widget:
         lift = 0.24 if self.pressed == name else 0.15 if self.hover == name else 0.07
         px, py = self.at(x, y)
         layer.round_rect(px, py, w * self.s, h * self.s, radius * self.s, (255, 255, 255), lift)
+
+    def accent(self):
+        """The design's accent colour (green in «Природа»)."""
+        return getattr(self.env, "accent", ACCENT)
 
     def text(self, layer, text, x, y, size, color=TEXT, weight="regular", anchor="lm", **kwargs):
         px, py = self.at(x, y)
@@ -389,7 +402,7 @@ class VolumeWidget(Widget):
         length = (x1 - x0) * self.s
         layer.capsule(tx, ty, length, 6 * self.s, (255, 255, 255), 0.16)
         filled = max(6 * self.s, self.level * length)
-        layer.capsule(tx, ty, filled, 6 * self.s, DIM if self.muted else ACCENT)
+        layer.capsule(tx, ty, filled, 6 * self.s, DIM if self.muted else self.accent())
         knob = 9 if self.pressed == "slider" else 8 if self.hover == "slider" else 7
         layer.circle(tx + self.level * length, ty + 3 * self.s, knob * self.s, (255, 255, 255))
         self.text(layer, f"{round(self.level * 100)}%", 266, 36, 15, MUTED if self.muted else TEXT,
@@ -456,7 +469,7 @@ class SystemWidget(Widget):
             length = 84 * self.s
             layer.capsule(bx, by, length, 6 * self.s, (255, 255, 255), 0.16)
             high = value >= 85 if key != "battery" else value <= 15
-            layer.capsule(bx, by, max(6 * self.s, length * value / 100), 6 * self.s, RED if high else ACCENT)
+            layer.capsule(bx, by, max(6 * self.s, length * value / 100), 6 * self.s, RED if high else self.accent())
             self.text(layer, f"{value:.0f}%", 236, y, 13, MUTED, anchor="rm")
             y += 32
 
@@ -518,7 +531,7 @@ class ButtonsWidget(Widget):
             flash = self._flash is not None and name == f"b{self._flash[0]}"
             px, py = self.at(x, y)
             if flash:
-                layer.round_rect(px, py, w * self.s, h * self.s, 12 * self.s, ACCENT, 0.85)
+                layer.round_rect(px, py, w * self.s, h * self.s, 12 * self.s, self.accent(), 0.85)
             else:
                 self.button(layer, name, x, y, w, h)
             self.text(layer, button["label"], x + w / 2, y + h / 2, 13, TEXT, "semibold", "mm",
@@ -595,6 +608,8 @@ class OnScreen:
 
     def __init__(self, app, scale):
         self.app, self.settings, self.s = app, app.settings, scale
+        self.accent = getattr(app, "theme", {}).get("accent", ACCENT)
+        self.look = getattr(app, "theme", {}).get("widgets", {})     # panel colour, opacity, condensation
         self.volume, self.load = system.Volume(), system.SystemLoad()
         self.frame, self.frame_id = None, 0
         self.items = []                  # [widget, window]

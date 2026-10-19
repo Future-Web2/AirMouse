@@ -20,7 +20,7 @@ from .onscreen import OnScreen
 from .settings import Settings
 from .tracker import Tracker, preload
 
-DESIGNS = (("glass", "Liquid Glass"), ("classic", "Классический"))
+DESIGNS = (("glass", "Liquid Glass"), ("nature", "Природа (запотевшее стекло)"), ("classic", "Классический"))
 MODES = (("hand", "Рука"), ("gaze", "Глаза"), ("head", "Голова"))
 
 MODE_TEXT = {
