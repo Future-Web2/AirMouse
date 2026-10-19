@@ -22,7 +22,7 @@ import math
 import time
 from datetime import datetime
 
-from . import system, winmouse
+from . import system, tuning, winmouse
 from .face import EYES_CLOSED, NO_FACE
 from .gestures import DRAG, MOVE, NO_HAND, PENDING, PRESSED, RIGHT, SCROLL
 from .overlay import Layer, LayeredWindow, cursor_pos
@@ -288,12 +288,17 @@ class StatusWidget(Widget):
         layer.icon(ICON_SETTINGS, *self.at(253, 23), 14 * self.s, MUTED)
         x, y, w, h = self.PREVIEW
         px, py = self.at(x, y)
-        frame = self.env.frame
+        frame = self.env.frame if self.env.camera_on() else None
         if frame is not None:
+            fh, fw = frame.shape[:2]
+            if fw * h > fh * w:              # a wide camera picture: show its middle
+                keep = fh * w // h
+                frame = frame[:, (fw - keep) // 2:(fw - keep) // 2 + keep]
             layer.image(frame, px, py, w * self.s, h * self.s, 12 * self.s)
         else:
             layer.round_rect(px, py, w * self.s, h * self.s, 12 * self.s, (0, 0, 0), 0.35)
-            self.text(layer, "Камера включается…", x + w / 2, y + h / 2, 13, MUTED, anchor="mm")
+            text = "Камера включается…" if self.env.camera_on() else "Камера выключена"
+            self.text(layer, text, x + w / 2, y + h / 2, 13, MUTED, anchor="mm")
 
 
 class ClockWidget(Widget):
@@ -619,6 +624,9 @@ class OnScreen:
     def status(self):
         return self.app._status()
 
+    def camera_on(self):
+        return self.app.tracker is not None
+
     def place(self, widget):
         for w, window in self.items:
             if w is widget and window.visible:
@@ -653,6 +661,16 @@ class OnScreen:
             if "x" in spec and "y" in spec:   # the screens may have changed since it was placed
                 spec["x"], spec["y"] = self.clamp(widget, spec["x"], spec["y"])
         self.arrange(only_new=True)
+
+    def set_scale(self, s):
+        """Draw the widgets and the cursor ring at another size («Размер виджетов»)."""
+        self.s = s
+        self.ring = CursorRing(s)
+        self._ring_state = None
+        if self._ring_window is not None:
+            self._ring_window.destroy()
+            self._ring_window = None
+        self.rebuild()
 
     def refresh(self):
         """Redraw every widget (after an edit that keeps the same widgets, e.g. a renamed button)."""
@@ -692,14 +710,16 @@ class OnScreen:
     def _tick(self):
         if self._closed:
             return
-        busy = False
+        delay = 100
         try:
-            busy = self._update(time.perf_counter())
+            delay = self._update(time.perf_counter())
         finally:
             if not self._closed:
-                self.app.after(16 if busy else 100, self._tick)
+                self.app.after(delay, self._tick)
 
     def _update(self, now):
+        """One timer tick. Returns the ms until the next: often while the ring follows the cursor
+        or a widget is being used, less often while widgets just sit there, rarely otherwise."""
         tracker = self.app.tracker
         running = tracker is not None and self.app._has_frame
         if tracker is not self._tracker:          # a new run: start counting its gestures afresh
@@ -711,7 +731,8 @@ class OnScreen:
                 self.toggle()
             self._toggles = tracker.widget_toggles
 
-        show = running and self.settings.widgets_on
+        always = tuning.get(self.settings, "widgets_always")
+        show = (running or always) and self.settings.widgets_on
         first = 1   # widgets drawn for the first time this tick: tens of ms each, so one per tick
         for widget, window in self.items:
             if show and widget.spec["on"]:
@@ -731,7 +752,10 @@ class OnScreen:
         if self._save:
             self._save = False
             self.app._schedule_save()
-        return show or ring
+        in_use = any(w.pressed is not None or w._drag is not None for w, _window in self.items)
+        if ring or in_use:
+            return 16
+        return 33 if show else 100
 
     def _update_ring(self, now, tracker, running):
         visible = running and self.settings.cursor_ring and tracker.mode not in (NO_HAND, NO_FACE)

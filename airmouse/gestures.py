@@ -16,6 +16,7 @@ import math
 import statistics
 from collections import deque
 
+from . import tuning
 from .filters import OneEuroFilter2D
 from .pointer import Pointer
 
@@ -37,26 +38,21 @@ DRAG = "drag"          # left button down, cursor follows the hand
 RIGHT = "right"        # right click sent, waiting for the fingers to open
 SCROLL = "scroll"
 
-PINCH_CONFIRM_FRAMES = 2
-RELEASE_CONFIRM_FRAMES = 2
-SCROLL_ENTER_FRAMES = 4
-SCROLL_EXIT_FRAMES = 3
-OPEN_FACTOR = 1.5           # fingers count as apart at 1.5x the touch distance
 EXTENDED_RATIO = 1.15       # straight finger: tip this much farther from the wrist than the middle joint
 THUMB_ABOVE = 0.35          # thumbs up: thumb tip this far (in palm lengths) above the rest of the hand
 
-# Seconds
-RIGHT_CLICK_WINDOW = 0.12   # time for the middle finger to join a pinch
+# Seconds. Confirmations are times, not frame counts, so 60 frames per second
+# behaves like 30 (only sooner). Most other numbers are in tuning.py («Подробнее»).
+SCROLL_ENTER_TIME = 0.095   # two-finger pose held this long starts scrolling (4 frames at 30 per second)
+SCROLL_EXIT_TIME = 0.06     # ... and left this long ends it (3 frames)
+THUMB_GAP = 0.1             # a thumbs up survives losing sight of it this long
 REWIND = 0.12               # click where the cursor was this long before the pinch
-POST_CLICK_HOLD = 0.5       # cursor stays put after a click, so a double click lands in place
-HAND_LOST_TIMEOUT = 0.3
-THUMB_TIME = 0.5            # hold a thumbs up this long to show / hide the on-screen widgets
+UNFREEZE_PX = 40            # screen pixels at 1920 px width: moving this far ends the hold after a click
 
-# Screen pixels at 1920 px width, scaled to the real screen
-DRAG_START_PX = 30
-UNFREEZE_PX = 40
 
-WHEEL_STEP = 30             # smallest wheel delta sent (120 = one notch)
+def since(start, on, t):
+    """Start time of a state that is on now (kept while it lasts), or None when it is off."""
+    return (t if start is None else start) if on else None
 
 
 def _dist(a, b):
@@ -84,13 +80,13 @@ def zone_rect(settings, frame_w, frame_h, screen_w, screen_h):
 
 
 def leash_px(settings, px):
-    """Leash length: how much shaking is ignored, grows with the stabilization setting."""
-    return (1.0 + 9.0 * settings.smoothing) * px
+    """Leash length: how much shaking is ignored, grows with the stabilization setting («Мёртвая зона» scales it)."""
+    return (1.0 + 9.0 * settings.smoothing) * px * tuning.get(settings, "deadzone")
 
 
 def tune_filter(f, settings, px):
     f.min_cutoff = 3.0 - 2.7 * settings.smoothing
-    f.beta = (0.02 - 0.016 * settings.smoothing) / px
+    f.beta = (0.02 - 0.016 * settings.smoothing) / px * tuning.get(settings, "fast_response")
 
 
 class HandFeatures:
@@ -129,16 +125,16 @@ class GestureEngine:
         self.mode = NO_HAND
         self.pinch = 0.0
         self._thumb_since = None           # when the thumbs up began
-        self._thumb_miss = 0               # frames since it was last seen
+        self._thumb_seen = None            # when it was last seen
         self._thumb_done = False           # this thumbs up already toggled the widgets
         self._filter.reset()
         self._ptr.reset()
         self._raw = deque(maxlen=3)
         self._hold_hand = None             # hand position when the hold began
         self._hold_until = None            # None: held until the gesture ends
-        self._closed = 0                   # consecutive frames with fingers touching
-        self._opened = 0                   # consecutive frames with fingers apart
-        self._pose = 0                     # frames in (or, while scrolling, out of) the two-finger pose
+        self._closed_since = None          # when the fingers began to touch
+        self._opened_since = None          # when they came apart
+        self._pose_since = None            # when the two-finger pose began (while scrolling: ended)
         self._pinch_start = 0.0
         self._scroll_ref = 0.0
         self._wheel = 0.0
@@ -162,7 +158,7 @@ class GestureEngine:
                 return []
             if self._lost_since is None:
                 self._lost_since = t
-            if t - self._lost_since < HAND_LOST_TIMEOUT:
+            if t - self._lost_since < tuning.seconds(self.settings, "hand_lost_ms"):
                 return []
             return self.release_all()
         self._lost_since = None
@@ -170,6 +166,7 @@ class GestureEngine:
         f = HandFeatures(pts)
         hand = self._hand_on_screen(f.palm, frame_w, frame_h, t)
         ptr = self._ptr
+        ptr.glide = tuning.seconds(self.settings, "glide_ms")
         if cursor_pos is None:
             cursor_pos = ptr.sent or hand
         moved_by_mouse = (
@@ -192,31 +189,34 @@ class GestureEngine:
     # -- gestures ---------------------------------------------------------
 
     def _gesture(self, f, hand, t, actions):
-        close = self.settings.pinch_threshold
+        s = self.settings
+        close = s.pinch_threshold
+        apart_at = close * tuning.get(s, "release_factor")    # fingers count as apart this far apart
         nearest = min(f.pinch_index, f.pinch_middle)
-        self.pinch = min(max((close * OPEN_FACTOR - nearest) / (close * (OPEN_FACTOR - 1)), 0.0), 1.0)
+        self.pinch = min(max((apart_at - nearest) / (apart_at - close), 0.0), 1.0)
         index_touch = f.pinch_index < close
         middle_touch = f.pinch_middle < close
-        apart = f.pinch_index > close * OPEN_FACTOR and f.pinch_middle > close * OPEN_FACTOR
-        self._closed = self._closed + 1 if (index_touch or middle_touch) else 0
-        self._opened = self._opened + 1 if apart else 0
-        pinched = self._closed >= PINCH_CONFIRM_FRAMES
-        released = self._opened >= RELEASE_CONFIRM_FRAMES
+        apart = f.pinch_index > apart_at and f.pinch_middle > apart_at
+        self._closed_since = since(self._closed_since, index_touch or middle_touch, t)
+        self._opened_since = since(self._opened_since, apart, t)
+        confirm = tuning.seconds(s, "pinch_confirm_ms") - 1e-6
+        pinched = self._closed_since is not None and t - self._closed_since >= confirm
+        released = self._opened_since is not None and t - self._opened_since >= confirm
 
         mode = self.mode
         if mode in (MOVE, SCROLL) and pinched:
             self._begin_pinch(hand, t, middle_touch, actions)
         elif mode == MOVE:
-            self._pose = self._pose + 1 if f.two_fingers else 0
-            if self._pose >= SCROLL_ENTER_FRAMES:
+            self._pose_since = since(self._pose_since, f.two_fingers, t)
+            if self._pose_since is not None and t - self._pose_since >= SCROLL_ENTER_TIME:
                 self._begin_scroll(hand, actions)
             else:
                 self._thumbs_up(f.thumb_up, t, actions)
         elif mode == SCROLL:
-            self._pose = 0 if f.two_fingers else self._pose + 1
-            if self._pose >= SCROLL_EXIT_FRAMES:
+            self._pose_since = since(self._pose_since, not f.two_fingers, t)
+            if self._pose_since is not None and t - self._pose_since >= SCROLL_EXIT_TIME:
                 self.mode = MOVE
-                self._pose = 0
+                self._pose_since = None
                 self._end_hold(hand)
             else:
                 self._scroll(hand, actions)
@@ -227,14 +227,14 @@ class GestureEngine:
             elif released:
                 actions.append(("click", "left"))
                 self._after_click(t)
-            elif t - self._pinch_start >= RIGHT_CLICK_WINDOW:
+            elif t - self._pinch_start >= tuning.seconds(s, "right_click_ms"):
                 actions.append(("down", "left"))
                 self.mode = PRESSED
         elif mode == PRESSED:
             if released:
                 actions.append(("up", "left"))
                 self._after_click(t)
-            elif math.dist(hand, self._hold_hand) > DRAG_START_PX * self._px:
+            elif math.dist(hand, self._hold_hand) > tuning.get(s, "drag_start_px") * self._px:
                 self.mode = DRAG
                 self._end_hold(hand)
         elif mode == DRAG:
@@ -248,17 +248,16 @@ class GestureEngine:
             self._thumb_since = None
 
     def _thumbs_up(self, seen, t, actions):
-        # One noisy frame does not end the gesture; letting go (3 frames) arms it again.
+        # A noisy frame or two does not end the gesture; letting go (THUMB_GAP) arms it again.
         if seen:
-            self._thumb_miss = 0
+            self._thumb_seen = t
             if self._thumb_since is None:
                 self._thumb_since = t
-            elif not self._thumb_done and t - self._thumb_since >= THUMB_TIME:
+            elif not self._thumb_done and t - self._thumb_since >= tuning.seconds(self.settings, "thumb_ms"):
                 actions.append(("widgets",))
                 self._thumb_done = True
             return
-        self._thumb_miss += 1
-        if self._thumb_miss >= 3:
+        if self._thumb_seen is None or t - self._thumb_seen >= THUMB_GAP - 1e-6:
             self._thumb_since = None
             self._thumb_done = False
 
@@ -270,7 +269,7 @@ class GestureEngine:
         self._hold_hand = hand
         self._hold_until = None
         self._pinch_start = t
-        self._pose = 0
+        self._pose_since = None
         if middle_touch:
             actions.append(("click", "right"))
             self.mode = RIGHT
@@ -279,11 +278,11 @@ class GestureEngine:
 
     def _after_click(self, t):
         self.mode = MOVE
-        self._hold_until = t + POST_CLICK_HOLD
+        self._hold_until = t + tuning.seconds(self.settings, "post_click_ms")
 
     def _begin_scroll(self, hand, actions):
         self.mode = SCROLL
-        self._pose = 0
+        self._pose_since = None
         if self._ptr.held is None:
             self._ptr.hold(self._ptr.cursor, actions)
         self._hold_hand = hand
@@ -301,7 +300,7 @@ class GestureEngine:
         self._scroll_ref += moved
         direction = 1 if self.settings.invert_scroll else -1   # hand up -> scroll up
         self._wheel += direction * moved / self._px * self.settings.scroll_speed
-        if abs(self._wheel) >= WHEEL_STEP:
+        if abs(self._wheel) >= tuning.get(self.settings, "wheel_step"):
             amount = int(self._wheel)
             self._wheel -= amount
             actions.append(("wheel", amount))
@@ -323,7 +322,8 @@ class GestureEngine:
         x = min(max(x, -margin), self.screen_w - 1 + margin)
         y = min(max(y, -margin), self.screen_h - 1 + margin)
         self._raw.append((x, y))
-        x = statistics.median(p[0] for p in self._raw)
-        y = statistics.median(p[1] for p in self._raw)
+        if tuning.get(s, "outlier_filter"):
+            x = statistics.median(p[0] for p in self._raw)
+            y = statistics.median(p[1] for p in self._raw)
         tune_filter(self._filter, s, self._px)
         return self._filter(x, y, t)

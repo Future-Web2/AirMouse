@@ -19,6 +19,7 @@ class Pointer:
 
     def __init__(self, screen_w, screen_h):
         self.screen_w, self.screen_h = screen_w, screen_h
+        self.glide = GLIDE_TIME
         self.reset()
 
     def reset(self):
@@ -57,7 +58,10 @@ class Pointer:
         self._t = t
         if self.held is not None:
             return
-        k = math.exp(-dt / GLIDE_TIME) if dt is not None else 1.0
+        if dt is None:
+            k = 1.0
+        else:
+            k = math.exp(-dt / self.glide) if self.glide > 0 else 0.0
         self._offset = (self._offset[0] * k, self._offset[1] * k)
         tx, ty = target[0] + self._offset[0], target[1] + self._offset[1]
         cx, cy = self.cursor

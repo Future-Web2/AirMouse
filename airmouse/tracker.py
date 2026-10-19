@@ -12,7 +12,7 @@ from functools import lru_cache
 import cv2
 import numpy as np
 
-from . import resource_path, winmouse
+from . import resource_path, tuning, winmouse
 from .face import EYES, EYES_CLOSED, NO_FACE, NOSE_TIP, FaceEngine, read_face
 from .gestures import (
     DRAG, MOVE, NO_HAND, PENDING, PRESSED, RIGHT, SCROLL,
@@ -86,8 +86,8 @@ def face_connections():
     ]
 
 
-def create_landmarker(kind="hand"):
-    """kind: "hand", or "gaze" / "head" for the face model."""
+def create_landmarker(kind="hand", confidence=0.6):
+    """kind: "hand", or "gaze" / "head" for the face model. confidence: how sure the hand model must be."""
     mediapipe()
     from mediapipe.tasks.python import BaseOptions
     from mediapipe.tasks.python.vision import (
@@ -99,9 +99,9 @@ def create_landmarker(kind="hand"):
             base_options=BaseOptions(model_asset_buffer=resource_path(HAND_MODEL).read_bytes()),
             running_mode=RunningMode.VIDEO,
             num_hands=1,
-            min_hand_detection_confidence=0.6,
-            min_hand_presence_confidence=0.6,
-            min_tracking_confidence=0.6,
+            min_hand_detection_confidence=confidence,
+            min_hand_presence_confidence=confidence,
+            min_tracking_confidence=confidence,
         ))
     return FaceLandmarker.create_from_options(FaceLandmarkerOptions(
         base_options=BaseOptions(model_asset_buffer=resource_path(FACE_MODEL).read_bytes()),
@@ -124,7 +124,10 @@ def selftest():
     return 0
 
 
-def _open_camera(index):
+CAMERA_SIZES = {640: (640, 480), 1280: (1280, 720)}
+
+
+def _open_camera(index, width=FRAME_W, fps=30):
     cap = cv2.VideoCapture(index, cv2.CAP_DSHOW)  # DirectShow opens much faster on Windows
     if not cap.isOpened():
         cap.release()
@@ -133,9 +136,13 @@ def _open_camera(index):
         cap.release()
         raise RuntimeError(f"Не удалось открыть камеру №{index}.\n"
                            "Проверьте, что она подключена и не занята другой программой.")
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, FRAME_W)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, FRAME_H)
-    cap.set(cv2.CAP_PROP_FPS, 30)
+    w, h = CAMERA_SIZES.get(int(width), (FRAME_W, FRAME_H))
+    if fps > 30 or w > FRAME_W:
+        # Most webcams give 60 frames per second or HD only as MJPG; the default format tops out lower.
+        cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, w)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, h)
+    cap.set(cv2.CAP_PROP_FPS, fps)
     cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
     return cap
 
@@ -193,9 +200,10 @@ class Tracker:
         mouse = winmouse.Mouse()
         cap = landmarker = None
         try:
-            cap = _open_camera(self.settings.camera_index)
+            s = self.settings
+            cap = _open_camera(s.camera_index, tuning.get(s, "camera_width"), tuning.get(s, "camera_fps"))
             mp = mediapipe()
-            landmarker = create_landmarker(self.kind)
+            landmarker = create_landmarker(self.kind, tuning.get(s, "hand_confidence"))
             sw, sh = winmouse.screen_size()
             if self.kind == "hand":
                 engine = GestureEngine(self.settings, sw, sh)
@@ -214,7 +222,8 @@ class Tracker:
                     continue
                 failures = 0
                 t = time.perf_counter()
-                frame = cv2.flip(frame, 1)  # mirror, so moving right moves the cursor right
+                if tuning.get(s, "mirror"):
+                    frame = cv2.flip(frame, 1)  # mirror, so moving right moves the cursor right
                 h, w = frame.shape[:2]
 
                 ms = max(int((t - t0) * 1000), last_ms + 1)  # MediaPipe needs increasing timestamps

@@ -192,6 +192,9 @@ class _WidgetEnv:
     def status(self):
         return "Курсор", (94, 224, 122), f"{30 - self.frame_id % 2} кадр/с"
 
+    def camera_on(self):
+        return True
+
     def cursor(self):
         return 0, 0
 
@@ -405,9 +408,9 @@ class HandSim:
                 if action[0] in ("click", "down") and action[1] == button]
 
 
-def still_hand(seconds=10.0, sigma=0.8, common=0.5, fps=FPS, seed=1):
+def still_hand(seconds=10.0, sigma=0.8, common=0.5, fps=FPS, seed=1, settings=None):
     """A hand held still: how often and how far the cursor moves anyway."""
-    sim = HandSim(seed, fps=fps, sigma=sigma, common=common)
+    sim = HandSim(seed, settings=settings, fps=fps, sigma=sigma, common=common)
     ox, oy = cam_for(960, 540)
     sim.rest(int(1.5 * fps), ox, oy)
     sim.moves, first, spread = 0, sim.cursor, 0.0
@@ -450,16 +453,17 @@ def click_offset(seed=3):
     return {"clicks": len(clicks), "offset_px": round(math.dist(clicks[0], before), 1) if clicks else None}
 
 
-def pinch_series(count=20, seed=4):
-    """Pinches of random speed: every one should be exactly one left click."""
-    sim = HandSim(seed)
+def pinch_series(count=20, seed=4, fps=FPS, settings=None):
+    """Pinches of random speed: every one should be exactly one left click (at any camera frame rate)."""
+    sim = HandSim(seed, settings=settings, fps=fps)
     rng = sim.rng
+    k = fps / FPS             # the same gestures in time, more frames at a higher rate
     ox, oy = cam_for(960, 540)
-    sim.rest(30, ox, oy)
+    sim.rest(round(30 * k), ox, oy)
     for _ in range(count):
-        sim.pinch(ox, oy, close=int(rng.integers(2, 5)), hold=int(rng.integers(2, 8)),
-                  release=int(rng.integers(2, 5)))
-        sim.rest(int(rng.integers(18, 30)), ox, oy)
+        sim.pinch(ox, oy, close=round(rng.integers(2, 5) * k), hold=round(rng.integers(2, 8) * k),
+                  release=round(rng.integers(2, 5) * k))
+        sim.rest(round(rng.integers(18, 30) * k), ox, oy)
     actions = [a for _t, a, _c in sim.events]
     return {"pinches": count, "left": len(sim.presses()), "right": len(sim.presses("right")),
             "scroll": sum(a[0] == "wheel" for a in actions), "widgets": actions.count(("widgets",))}
@@ -496,19 +500,19 @@ def double_click(seed=5):
     return {"clicks": len(clicks), "same_pixel": ok}
 
 
-def false_actions(seconds=60.0, seed=6):
+def false_actions(seconds=60.0, seed=6, fps=FPS):
     """An open hand that shakes (tremor and heavy tracking noise) but does nothing: count the actions."""
-    sim = HandSim(seed, sigma=1.5, common=1.0)
+    sim = HandSim(seed, sigma=1.5, common=1.0, fps=fps)
     ox, oy = cam_for(960, 540)
-    for i in range(int(seconds * FPS)):
-        t = i / FPS
+    for i in range(int(seconds * fps)):
+        t = i / fps
         sim.step(ox + 2.0 * math.sin(2 * math.pi * 6 * t), oy + 2.0 * math.cos(2 * math.pi * 5 * t))
     return len(sim.events)
 
 
-def glitch(seed=7):
+def glitch(seed=7, settings=None):
     """One frame where tracking jumps 40 px: how far the cursor follows the jump, px."""
-    sim = HandSim(seed)
+    sim = HandSim(seed, settings=settings)
     ox, oy = cam_for(960, 540)
     sim.rest(45, ox, oy)
     rest_at, worst = sim.cursor, 0.0

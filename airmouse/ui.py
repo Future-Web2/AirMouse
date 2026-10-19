@@ -13,6 +13,7 @@ import tkinter as tk
 import cv2
 import numpy as np
 
+from . import tuning
 from .app_base import CALIBRATE_TEXT, GESTURES, METERS, MODES, BaseApp, meter_value
 from .blit import Blitter
 from .glass import ICON_CAMERA, LiquidBackdrop, blit_text, capsule, shape
@@ -22,10 +23,10 @@ W, H = 1120, 840                         # logical size of the window
 SIDEBAR = (W - 16 - 376, 16, 376, H - 32)
 STATUS = (16, 16, 310, 50)
 WIDGETS_BUTTON = (338, 16, 150, 50)
+ADVANCED_BUTTON = (500, 16, 160, 50)
 SESSION = (16, 80, 310, 118)
 CARD_W = 480
-FPS = 30          # window redraws per second while it is in front
-IDLE_FPS = 12     # ... while another window is active (mouse control is not affected)
+IDLE_FPS = 12     # window redraws per second while another window is active (in front: «Частота окна»)
 
 
 def _style_title_bar(window):
@@ -113,10 +114,12 @@ class App(BaseApp):
                                 st.design, lambda d: self.after(250, self._switch_design, d))
         self.calibrate_btn = Button(x0, 746, cw, 44, "", self._calibrate, size=15)
         self.widgets_btn = Button(*WIDGETS_BUTTON, "Виджеты", self.open_widget_editor, size=15)
+        self.advanced_btn = Button(*ADVANCED_BUTTON, "Подробнее", self.open_advanced, size=15)
 
     def _widgets(self):
         return [self.segmented, self.start_btn, self.control_toggle, self.camera_stepper, *self.sliders,
-                self.invert_toggle, self.top_toggle, self.design, self.calibrate_btn, self.widgets_btn]
+                self.invert_toggle, self.top_toggle, self.design, self.calibrate_btn, self.widgets_btn,
+                self.advanced_btn]
 
     def scale(self):
         return self.s
@@ -307,7 +310,8 @@ class App(BaseApp):
         hwnd = ctypes.windll.user32.GetParent(self.root.winfo_id())
         in_front = ctypes.windll.user32.GetForegroundWindow() == hwnd
         spent = time.perf_counter() - start
-        self.after(max(1, int((1 / (FPS if in_front else IDLE_FPS) - spent) * 1000)), self._tick)
+        fps = tuning.get(self.settings, "window_fps") if in_front else IDLE_FPS
+        self.after(max(1, int((1 / fps - spent) * 1000)), self._tick)
 
     def _cover(self, frame):
         """Scale the camera image to fill the window, cropping the overflow, slightly dimmed."""

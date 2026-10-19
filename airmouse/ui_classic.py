@@ -13,6 +13,7 @@ try:
 except ImportError:
     sv_ttk = None
 
+from . import tuning
 from .app_base import CALIBRATE_TEXT, DESIGNS, GESTURES, METERS, MODES, BaseApp, meter_value
 
 PREVIEW_W, PREVIEW_H = 480, 360
@@ -155,7 +156,12 @@ class App(BaseApp):
         self._check(box, "Поверх всех окон", "always_on_top", self._set_always_on_top)
         self.widgets_var = self._check(box, "Виджеты на экране (палец вверх, Ctrl+Alt+W)", "widgets_on")
         self._check(box, "Кольцо у курсора", "cursor_ring")
-        ttk.Button(box, text="Настроить виджеты…", command=self.open_widget_editor).pack(fill="x", pady=(10, 0))
+        buttons = ttk.Frame(box)
+        buttons.pack(fill="x", pady=(10, 0))
+        buttons.columnconfigure((0, 1), weight=1, uniform="more")
+        ttk.Button(buttons, text="Настроить виджеты…", command=self.open_widget_editor).grid(
+            row=0, column=0, sticky="ew", padx=(0, 4))
+        ttk.Button(buttons, text="Подробнее…", command=self.open_advanced).grid(row=0, column=1, sticky="ew")
 
         design_row = ttk.Frame(box)
         design_row.pack(fill="x", pady=(10, 0))
@@ -248,6 +254,10 @@ class App(BaseApp):
         self.calibrate_btn.configure(text=label, state="normal" if enabled else "disabled")
 
     def _on_frame(self, frame):
+        fh, fw = frame.shape[:2]
+        if fw * PREVIEW_H > fh * PREVIEW_W:      # a wide camera picture: show its middle
+            keep = fh * PREVIEW_W // PREVIEW_H
+            frame = frame[:, (fw - keep) // 2:(fw - keep) // 2 + keep]
         small = cv2.resize(frame, (PREVIEW_W, PREVIEW_H), interpolation=cv2.INTER_AREA)
         self.photo.paste(Image.fromarray(small))
         self.canvas.itemconfigure(self.canvas_image, state="normal")
@@ -269,7 +279,7 @@ class App(BaseApp):
             self._show_session()
         if self.widgets_var.get() != self.settings.widgets_on:   # the thumbs up / Ctrl+Alt+W toggle it too
             self.widgets_var.set(self.settings.widgets_on)
-        self.after(33, self._tick)
+        self.after(int(1000 / tuning.get(self.settings, "window_fps")), self._tick)
 
     def _show_session(self):
         if self.session.started is None:

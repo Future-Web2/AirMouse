@@ -12,7 +12,7 @@ from tkinter import messagebox
 
 import cv2
 
-from . import resource_path, system, winmouse
+from . import resource_path, system, tuning, winmouse
 from .calibration import GazeCalibration
 from .face import EYES_CLOSED, NO_FACE
 from .gestures import DRAG, MOVE, NO_HAND, PENDING, PRESSED, RIGHT, SCROLL
@@ -138,7 +138,7 @@ class BaseApp:
         self._calibrate_left = 0
         self.session = Session()
         self.onscreen = None       # the on-screen widgets, created once the window exists
-        self._editor = None
+        self._editor = self._advanced = None
 
         self.root = tk.Tk()
         self.root.title("AirMouse")
@@ -151,7 +151,7 @@ class BaseApp:
         """Call at the end of the subclass __init__, once the window is built."""
         self.root.attributes("-topmost", self.settings.always_on_top)
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
-        self.onscreen = OnScreen(self, self.scale())
+        self.onscreen = OnScreen(self, self.scale() * tuning.get(self.settings, "widget_scale"))
         if self._autostart:
             self._start()
         else:
@@ -167,6 +167,19 @@ class BaseApp:
             self._editor.focus()
         else:
             self._editor = WidgetEditor(self)
+
+    def open_advanced(self):
+        from .advanced import AdvancedSettings
+        if self._advanced is not None and self._advanced.alive():
+            self._advanced.focus()
+        else:
+            self._advanced = AdvancedSettings(self)
+
+    def restart_tracker(self):
+        """Start the camera again with new camera settings (if it is on)."""
+        if self.tracker is not None:
+            self._stop()
+            self._start()
 
     def run(self):
         self.root.mainloop()

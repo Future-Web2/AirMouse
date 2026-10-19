@@ -18,8 +18,9 @@ import math
 
 import numpy as np
 
+from . import tuning
 from .filters import OneEuroFilter2D
-from .gestures import DRAG, MOVE, SCROLL, WHEEL_STEP, leash_px, tune_filter
+from .gestures import DRAG, MOVE, SCROLL, leash_px, since, tune_filter
 from .pointer import Pointer
 
 # MediaPipe face landmark indices (478-point model, with irises)
@@ -34,17 +35,14 @@ NOSE_TIP = 1
 NO_FACE = "no_face"
 EYES_CLOSED = "eyes_closed"
 
-# Blendshape scores, 0..1
-EYE_OPEN = 0.4          # both eyes below this: open
-EYE_CLOSED = 0.55       # above this: closed
-MOUTH_OPEN = 0.45
-MOUTH_CLOSED = 0.25
-BROWS_UP = 0.5
-BROWS_DOWN = 0.3
-CONFIRM_FRAMES = 3      # mouth / eyebrows must hold a state this many frames
+# Blendshape scores, 0..1. The engine takes the "closed", "mouth open" and "brows up"
+# thresholds from tuning.py («Подробнее»); the other side sits a fixed step below.
+EYE_OPEN = 0.4          # both eyes below this: open (calibration and gaze use this)
+OPEN_BELOW = 0.15       # eyes count as open this far below the "closed" threshold
+RELAX_BELOW = 0.2       # mouth closed / brows down this far below their thresholds
 
 # Seconds
-WINK_TIME = 0.3         # wink at least this long -> right click
+CONFIRM_TIME = 0.06     # mouth / eyebrows must hold a state this long (3 frames at 30 per second)
 MAX_CLOSE_TIME = 2.0    # eyes closed longer than this: resting (or looking down), not clicking
 DOUBLE_CLICK_GAP = 1.5  # second long blink within this -> double click
 POST_CLICK_HOLD = 0.6
@@ -212,8 +210,8 @@ class FaceEngine:
         self._last_click = None    # (t, position) of the last blink click
         self._dragging = False
         self._scrolling = False
-        self._mouth = 0
-        self._brows = 0
+        self._mouth_since = None   # when the mouth began to open (while dragging: to close)
+        self._brows_since = None   # when the brows went up (while scrolling: down)
         self._scroll_ref = 0.0
         self._wheel = 0.0
         self._lost_since = None
@@ -257,7 +255,7 @@ class FaceEngine:
             ptr.start(cursor_pos, target)
 
         actions = []
-        self._mouth_and_brows(face, target, actions)
+        self._mouth_and_brows(face, target, t, actions)
         if not self._scrolling:
             self._eyes(face, t, dt, actions)
         if ptr.held is not None and self._hold_until is not None and t >= self._hold_until:
@@ -317,34 +315,37 @@ class FaceEngine:
 
     # -- gestures ---------------------------------------------------------
 
-    def _mouth_and_brows(self, face, target, actions):
+    def _mouth_and_brows(self, face, target, t, actions):
+        s = self.settings
+        mouth_open, brows_up = tuning.get(s, "mouth_open"), tuning.get(s, "brows_up")
+        confirm = CONFIRM_TIME - 1e-6
         if not self._scrolling:
             if self._dragging:
-                self._mouth = self._mouth + 1 if face.jaw < MOUTH_CLOSED else 0
-                if self._mouth >= CONFIRM_FRAMES:
+                self._mouth_since = since(self._mouth_since, face.jaw < mouth_open - RELAX_BELOW, t)
+                if self._mouth_since is not None and t - self._mouth_since >= confirm:
                     actions.append(("up", "left"))
                     self._dragging = False
-                    self._mouth = 0
+                    self._mouth_since = None
             else:
-                self._mouth = self._mouth + 1 if face.jaw > MOUTH_OPEN else 0
-                if self._mouth >= CONFIRM_FRAMES:
+                self._mouth_since = since(self._mouth_since, face.jaw > mouth_open, t)
+                if self._mouth_since is not None and t - self._mouth_since >= confirm:
                     actions.append(("down", "left"))
                     self._dragging = True
-                    self._mouth = 0
+                    self._mouth_since = None
         if self._dragging:
             return
         if self._scrolling:
-            self._brows = self._brows + 1 if face.brow < BROWS_DOWN else 0
-            if self._brows >= CONFIRM_FRAMES:
+            self._brows_since = since(self._brows_since, face.brow < brows_up - RELAX_BELOW, t)
+            if self._brows_since is not None and t - self._brows_since >= confirm:
                 self._scrolling = False
-                self._brows = 0
+                self._brows_since = None
                 self._ptr.release(target)
                 self._hold_until = None
         else:
-            self._brows = self._brows + 1 if face.brow > BROWS_UP else 0
-            if self._brows >= CONFIRM_FRAMES:
+            self._brows_since = since(self._brows_since, face.brow > brows_up, t)
+            if self._brows_since is not None and t - self._brows_since >= confirm:
                 self._scrolling = True
-                self._brows = 0
+                self._brows_since = None
                 self._eyes_shut = False
                 if self._ptr.held is None:
                     self._ptr.hold(self._ptr.cursor, actions)
@@ -359,15 +360,17 @@ class FaceEngine:
         speed = max(0.0, abs(d) - SCROLL_DEADZONE) * SCROLL_RATE * self.settings.scroll_speed
         direction = 1 if self.settings.invert_scroll else -1   # head up -> scroll up
         self._wheel += direction * math.copysign(speed, d) * dt
-        if abs(self._wheel) >= WHEEL_STEP:
+        if abs(self._wheel) >= tuning.get(self.settings, "wheel_step"):
             amount = int(self._wheel)
             self._wheel -= amount
             actions.append(("wheel", amount))
 
     def _eyes(self, face, t, dt, actions):
         low, high = min(face.blink), max(face.blink)
+        closed_at = tuning.get(self.settings, "eye_closed")
+        open_below = closed_at - OPEN_BELOW
         if not self._eyes_shut:
-            if high >= EYE_OPEN:
+            if high >= open_below:
                 # Eyes start to close: pin the cursor where it was a moment ago.
                 self._eyes_shut = True
                 self._shut_start = t
@@ -377,12 +380,12 @@ class FaceEngine:
                 self._hold_until = None
             return
 
-        if low > EYE_CLOSED:
+        if low > closed_at:
             self._both_time += dt
-        elif high > EYE_CLOSED and low < EYE_OPEN:
+        elif high > closed_at and low < open_below:
             self._wink_time += dt
         shut_for = t - self._shut_start
-        if high >= EYE_OPEN:
+        if high >= open_below:
             if shut_for > MAX_CLOSE_TIME and self._hold_until is None:
                 self._hold_until = t  # resting eyes or looking down: let the cursor move again
             return
@@ -393,7 +396,7 @@ class FaceEngine:
             if self._both_time >= self.settings.blink_time:
                 self._blink_click(t, actions)
                 settle = POST_CLICK_HOLD
-            elif self._wink_time >= WINK_TIME:
+            elif self._wink_time >= tuning.seconds(self.settings, "wink_ms"):
                 actions.append(("click", "right"))
                 settle = POST_CLICK_HOLD
         if self._ptr.held is not None:

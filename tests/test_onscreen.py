@@ -60,6 +60,9 @@ class Env:
     def status(self):
         return "Курсор", onscreen.GREEN, "30 кадр/с"
 
+    def camera_on(self):
+        return True
+
     def cursor(self):
         return self.mouse_at
 
