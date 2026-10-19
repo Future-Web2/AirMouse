@@ -1,17 +1,15 @@
 """Camera -> MediaPipe hand or face tracking -> gestures -> mouse, on a background thread."""
 
+import importlib.util
 import math
+import sys
 import threading
 import time
+import types
+from functools import lru_cache
 
 import cv2
-import mediapipe as mp
 import numpy as np
-from mediapipe.tasks.python import BaseOptions
-from mediapipe.tasks.python.vision import (
-    FaceLandmarker, FaceLandmarkerOptions, HandLandmarker, HandLandmarkerOptions, RunningMode,
-)
-from mediapipe.tasks.python.vision.face_landmarker import FaceLandmarksConnections
 
 from . import resource_path, winmouse
 from .face import EYES, EYES_CLOSED, NO_FACE, NOSE_TIP, FaceEngine, read_face
@@ -31,13 +29,6 @@ HAND_CONNECTIONS = (
     (9, 13), (13, 14), (14, 15), (15, 16),
     (13, 17), (17, 18), (18, 19), (19, 20), (0, 17),
 )
-_C = FaceLandmarksConnections
-FACE_CONNECTIONS = [
-    (c.start, c.end)
-    for group in (_C.FACE_LANDMARKS_FACE_OVAL, _C.FACE_LANDMARKS_LEFT_EYE, _C.FACE_LANDMARKS_RIGHT_EYE,
-                  _C.FACE_LANDMARKS_LEFT_EYEBROW, _C.FACE_LANDMARKS_RIGHT_EYEBROW, _C.FACE_LANDMARKS_LIPS)
-    for c in group
-]
 
 # BGR colours of the hand / face drawing for each mode
 MODE_COLORS = {
@@ -54,8 +45,53 @@ MODE_COLORS = {
 PAUSED_COLOR = (150, 150, 150)
 
 
+def mediapipe():
+    """The mediapipe module, imported on first use: it takes a while, and the window does not wait for it."""
+    if "matplotlib" not in sys.modules and importlib.util.find_spec("matplotlib") is None:
+        # mediapipe.tasks imports matplotlib for plotting helpers AirMouse never
+        # calls. The app is built without it (big and slow to import), so an
+        # empty stand-in lets that import succeed.
+        plt = types.ModuleType("matplotlib.pyplot")
+        stub = types.ModuleType("matplotlib")
+        stub.pyplot = plt
+        sys.modules.update({"matplotlib": stub, "matplotlib.pyplot": plt})
+    import mediapipe as mp
+    return mp
+
+
+def _warm_up():
+    try:
+        mediapipe()
+        from mediapipe.tasks.python.core import mediapipe_c_bindings
+        mediapipe_c_bindings.load_raw_library()   # the 60 MB library itself, slow the first time too
+    except Exception:  # «Старт» loads it again and reports what went wrong
+        pass
+
+
+def preload():
+    """Load MediaPipe in the background while the user looks at the window, so «Старт» is quick."""
+    threading.Thread(target=_warm_up, name="AirMousePreload", daemon=True).start()
+
+
+@lru_cache(maxsize=1)
+def face_connections():
+    mediapipe()
+    from mediapipe.tasks.python.vision.face_landmarker import FaceLandmarksConnections as C
+    return [
+        (c.start, c.end)
+        for group in (C.FACE_LANDMARKS_FACE_OVAL, C.FACE_LANDMARKS_LEFT_EYE, C.FACE_LANDMARKS_RIGHT_EYE,
+                      C.FACE_LANDMARKS_LEFT_EYEBROW, C.FACE_LANDMARKS_RIGHT_EYEBROW, C.FACE_LANDMARKS_LIPS)
+        for c in group
+    ]
+
+
 def create_landmarker(kind="hand"):
     """kind: "hand", or "gaze" / "head" for the face model."""
+    mediapipe()
+    from mediapipe.tasks.python import BaseOptions
+    from mediapipe.tasks.python.vision import (
+        FaceLandmarker, FaceLandmarkerOptions, HandLandmarker, HandLandmarkerOptions, RunningMode,
+    )
     # Pass the model as bytes: MediaPipe cannot open paths with non-Latin characters.
     if kind == "hand":
         return HandLandmarker.create_from_options(HandLandmarkerOptions(
@@ -76,6 +112,7 @@ def create_landmarker(kind="hand"):
 
 def selftest():
     """Load both models and run them once on a blank frame (checks a built .exe)."""
+    mp = mediapipe()
     image = mp.Image(image_format=mp.ImageFormat.SRGB, data=np.zeros((FRAME_H, FRAME_W, 3), np.uint8))
     for kind in ("hand", "head"):
         landmarker = create_landmarker(kind)
@@ -150,6 +187,7 @@ class Tracker:
         cap = landmarker = None
         try:
             cap = _open_camera(self.settings.camera_index)
+            mp = mediapipe()
             landmarker = create_landmarker(self.kind)
             sw, sh = winmouse.screen_size()
             if self.kind == "hand":
@@ -235,7 +273,7 @@ class Tracker:
             cv2.circle(frame, (int(px), int(py)), 9, (255, 255, 255), 2, cv2.LINE_AA)
         elif pts:
             points = [(int(p[0]), int(p[1])) for p in pts]
-            for a, b in FACE_CONNECTIONS:
+            for a, b in face_connections():
                 cv2.line(frame, points[a], points[b], color, 1, cv2.LINE_AA)
             for _c1, _c2, iris in EYES:
                 cx = sum(pts[i][0] for i in iris) / len(iris)

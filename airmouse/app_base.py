@@ -14,7 +14,7 @@ from .calibration import GazeCalibration
 from .face import EYES_CLOSED, NO_FACE
 from .gestures import DRAG, MOVE, NO_HAND, PENDING, PRESSED, RIGHT, SCROLL
 from .settings import Settings
-from .tracker import Tracker
+from .tracker import Tracker, preload
 
 DESIGNS = (("glass", "Liquid Glass"), ("classic", "Классический"))
 MODES = (("hand", "Рука"), ("gaze", "Глаза"), ("head", "Голова"))
@@ -69,6 +69,7 @@ COUNTDOWN_TEXT = {
     "head": "Смотрите в центр экрана… {}",
 }
 CALIBRATE_DELAY = 3  # seconds to get into a comfortable position
+PRELOAD_DELAY = 1500  # ms after the window appears: load MediaPipe in the background
 
 
 def meter_value(face, key):
@@ -110,6 +111,8 @@ class BaseApp:
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
         if self._autostart:
             self._start()
+        else:
+            self.after(PRELOAD_DELAY, preload)
 
     def run(self):
         self.root.mainloop()
