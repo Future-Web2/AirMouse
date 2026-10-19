@@ -1,4 +1,11 @@
-﻿mediapipe==1.1.1
-opencv-contrib-python==5.0.0.93
+﻿# Everything AirMouse uses, with exact versions. Install with --no-deps (build.bat does):
+# mediapipe also asks for opencv-contrib-python, matplotlib and sounddevice, which AirMouse
+# does not need; the smaller headless OpenCV below has everything it uses.
+mediapipe==1.1.1
+opencv-python-headless==5.0.0.93
+numpy==2.5.4
 pillow==13.0.0
 sv-ttk==2.6.1
+absl-py==2.5.1
+certifi==2026.7.22
+flatbuffers==25.12.19
