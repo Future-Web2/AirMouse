@@ -135,6 +135,7 @@ class BaseApp:
         self._jobs = set()
         self._hotkey_was_down = False
         self._widgets_key_was_down = False
+        self._notebook_key_was_down = False
         self._calibrate_left = 0
         self.session = Session()
         self.onscreen = None       # the on-screen widgets, created once the window exists
@@ -174,6 +175,11 @@ class BaseApp:
             self._advanced.focus()
         else:
             self._advanced = AdvancedSettings(self)
+
+    def toggle_notebook(self):
+        """Open or close the notebook for drawing (Ctrl+Alt+N, the «Блокнот» button, the pen on the mini panel)."""
+        if self.onscreen is not None:
+            self.onscreen.toggle_notebook()
 
     def restart_tracker(self):
         """Start the camera again with new camera settings (if it is on)."""
@@ -322,6 +328,10 @@ class BaseApp:
         if down and not self._widgets_key_was_down and self.onscreen is not None:
             self.onscreen.toggle()
         self._widgets_key_was_down = down
+        down = ctrl_alt and winmouse.key_down(ord("N"))
+        if down and not self._notebook_key_was_down:
+            self.toggle_notebook()
+        self._notebook_key_was_down = down
 
         tracker = self.tracker
         self.session.sample(tracker if self._has_frame else None, time.perf_counter())

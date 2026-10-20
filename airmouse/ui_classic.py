@@ -158,10 +158,12 @@ class App(BaseApp):
         self._check(box, "Кольцо у курсора", "cursor_ring")
         buttons = ttk.Frame(box)
         buttons.pack(fill="x", pady=(10, 0))
-        buttons.columnconfigure((0, 1), weight=1, uniform="more")
-        ttk.Button(buttons, text="Настроить виджеты…", command=self.open_widget_editor).grid(
+        buttons.columnconfigure((0, 1, 2), weight=1, uniform="more")
+        ttk.Button(buttons, text="Виджеты…", command=self.open_widget_editor).grid(
             row=0, column=0, sticky="ew", padx=(0, 4))
-        ttk.Button(buttons, text="Подробнее…", command=self.open_advanced).grid(row=0, column=1, sticky="ew")
+        ttk.Button(buttons, text="Блокнот", command=self.toggle_notebook).grid(row=0, column=1, sticky="ew",
+                                                                            padx=(0, 4))
+        ttk.Button(buttons, text="Подробнее…", command=self.open_advanced).grid(row=0, column=2, sticky="ew")
 
         design_row = ttk.Frame(box)
         design_row.pack(fill="x", pady=(10, 0))

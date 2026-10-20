@@ -3,9 +3,11 @@
 Nothing is shown and nothing is pressed: windows, keys and the volume are stand-ins.
 """
 
+import tempfile
 import time
 import unittest
 from collections import Counter, deque
+from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
@@ -278,6 +280,11 @@ class ManagerTest(unittest.TestCase):
             patcher = mock.patch.object(onscreen, name, value)
             patcher.start()
             self.addCleanup(patcher.stop)
+        folder = tempfile.TemporaryDirectory()          # the notebook's pages, not the user's
+        self.addCleanup(folder.cleanup)
+        patcher = mock.patch.object(onscreen.settings_file, "SETTINGS_DIR", Path(folder.name))
+        patcher.start()
+        self.addCleanup(patcher.stop)
         self.app = FakeApp()
         self.screen = OnScreen(self.app, 1.0)
         self.addCleanup(self.screen.close)
@@ -342,6 +349,35 @@ class ManagerTest(unittest.TestCase):
         self.assertEqual(pressed, ["playpause"])
         self.assertEqual(widget.error[0], "Не удалось открыть «x»")
         self.assertEqual(self.app.editors, 1)
+
+    def test_notebook_opens_without_the_camera(self):
+        self.screen._update(1.0)
+        self.assertFalse(any(w.visible for w in self.windows().values()))
+        self.app.settings.widgets_on = False                  # hidden by a thumbs up earlier
+        self.assertTrue(self.screen.toggle_notebook())
+        self.run_timer(1.1)
+        windows = self.windows()
+        self.assertTrue(windows["notebook"].visible)
+        self.assertFalse(windows["status"].visible)           # the others still wait for the camera
+        self.assertTrue(self.app.settings.widgets_on)
+        self.assertFalse(self.screen.toggle_notebook())
+        self.screen._update(1.2)
+        self.assertFalse(windows["notebook"].visible)
+
+    def test_pen_on_the_mini_panel_opens_the_notebook(self):
+        status = next(w for w, _window in self.screen.items if w.spec["type"] == "status")
+        click(status, *centre(status, "notebook"))
+        self.screen._update(1.0)
+        notebook = next(w for w, _window in self.screen.items if w.spec["type"] == "notebook")
+        self.assertTrue(notebook.spec["on"])
+
+    def test_copy_shows_how_it_went(self):
+        notebook = next(w for w, _window in self.screen.items if w.spec["type"] == "notebook")
+        self.assertIs(notebook.book, self.screen.notebook)    # one notebook, whatever the widget windows
+        with mock.patch.object(self.screen.notebook, "copy", lambda: True):
+            self.screen.request(("copy_page", notebook))
+            self.screen._update(1.0)
+        self.assertIn("Скопировано", notebook.note[0])
 
     def test_arrange_keeps_widgets_on_the_screen_in_a_column(self):
         self.screen.arrange()

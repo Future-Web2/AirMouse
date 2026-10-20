@@ -48,6 +48,7 @@ class WidgetEditor:
                         command=self._switches).grid(row=0, column=0, columnspan=2, sticky="w")
         ttk.Label(outer, foreground=MUTED, justify="left", text=(
             "Показать или скрыть: подержите большой палец вверх или нажмите Ctrl+Alt+W.\n"
+            "Блокнот для рисования открывают Ctrl+Alt+N и карандаш на мини-панели AirMouse.\n"
             "Виджеты не забирают фокус: их кнопки нажимают клавиши в той программе, где вы работаете.\n"
             "Чтобы передвинуть виджет, потяните его за фон (щипок, подержать и вести).")).grid(
             row=1, column=0, columnspan=2, sticky="w", pady=(2, 8))

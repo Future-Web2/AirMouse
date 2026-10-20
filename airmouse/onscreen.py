@@ -10,6 +10,8 @@ copies in the program you were using. Drag a widget by its background to move it
   media     previous / play-pause / next track
   system    processor, memory and battery
   buttons   your own panel: buttons that press key combinations or open things
+  notebook  pages to draw on, like Paint: pinch on the paper and move the hand
+            (opened on purpose, so it shows even while the camera is off)
 
 The cursor ring follows the cursor and shows the gesture in progress: it fills
 as the fingers close (or the eyes stay shut) and flashes on a click.
@@ -19,13 +21,19 @@ Widget code runs in the Tk thread: mouse handlers from the window procedure
 """
 
 import math
+import os
 import time
 from datetime import datetime
 
+import cv2
+import numpy as np
+
+from . import settings as settings_file
 from . import system, tuning, winmouse
 from .face import EYES_CLOSED, NO_FACE
 from .gestures import DRAG, MOVE, NO_HAND, PENDING, PRESSED, RIGHT, SCROLL
 from .glass import condensation
+from .notebook import COLORS, PAGE_H, PAGE_W, Notebook
 from .overlay import Layer, LayeredWindow, cursor_pos, round_mask
 
 TEXT = (245, 247, 250)
@@ -44,7 +52,12 @@ ICON_PLAY, ICON_PREV, ICON_NEXT = "", "", ""
 ICON_VOLUME, ICON_MUTE, ICON_SETTINGS = "", "", ""
 ICON_UP, ICON_DOWN, ICON_PAUSE = "", "", ""
 
-KINDS = ("status", "clock", "volume", "media", "system", "buttons")
+ICON_PEN, ICON_MARKER, ICON_ERASER = "", "", ""
+ICON_UNDO, ICON_CLEAR, ICON_COPY, ICON_FOLDER = "", "", "", ""
+ICON_BACK, ICON_FORWARD, ICON_ADD = "", "", ""
+ICON_BIG, ICON_SMALL, ICON_CLOSE = "", "", ""
+
+KINDS = ("status", "clock", "volume", "media", "system", "buttons", "notebook")
 NAMES = {
     "status": "AirMouse: камера и жест",
     "clock": "Часы",
@@ -52,6 +65,7 @@ NAMES = {
     "media": "Музыка и видео",
     "system": "Нагрузка компьютера",
     "buttons": "Панель кнопок",
+    "notebook": "Блокнот: рисовать рукой",
 }
 MAX_BUTTONS = 12
 DEFAULT_BUTTONS = (
@@ -82,6 +96,7 @@ def default_widgets():
          "buttons": [button_spec(*b) for b in DEFAULT_BUTTONS]},
         {"type": "clock", "on": False},
         {"type": "system", "on": False},
+        {"type": "notebook", "on": False},
     ]
 
 
@@ -123,6 +138,8 @@ class Widget:
     """A panel that draws itself and answers the mouse. Layout is in logical pixels (x env.s)."""
 
     width, height = 200, 80
+    ANYTIME = False     # True: shown whenever it is on, also while the camera is off
+    CENTRED = False     # True: «Расставить заново» puts it in the middle of the screen, not in the column
 
     def __init__(self, spec, env):
         self.spec, self.env, self.s = spec, env, env.s
@@ -185,6 +202,7 @@ class Widget:
             elif self.pressed is not None:
                 part, self.pressed = self.pressed, None
                 self.dirty = True
+                self.on_release(part)
                 if self.part_at(x, y) == part:
                     self.on_click(part)
         elif kind == "wheel":
@@ -193,8 +211,9 @@ class Widget:
             if kind == "cancel":
                 self._drag = None
                 if self.pressed is not None:
-                    self.pressed = None
+                    part, self.pressed = self.pressed, None
                     self.dirty = True
+                    self.on_release(part)
             self._set_hover(None)
 
     def _set_hover(self, part):
@@ -213,6 +232,9 @@ class Widget:
 
     def on_drag(self, part, x, y):
         pass
+
+    def on_release(self, part):
+        """The button went up (or the press was cancelled), wherever the cursor is."""
 
     def on_click(self, part):
         pass
@@ -276,10 +298,10 @@ class StatusWidget(Widget):
         self._drawn = 0.0
 
     def parts(self):
-        return [("settings", (238, 8, 30, 30))]
+        return [("notebook", (202, 8, 30, 30)), ("settings", (238, 8, 30, 30))]
 
     def on_click(self, part):
-        self.env.request(("editor",))
+        self.env.request(("notebook",) if part == "notebook" else ("editor",))
 
     def tick(self, now):
         state = (self.env.status(), self.env.frame_id)
@@ -295,10 +317,10 @@ class StatusWidget(Widget):
         (text, color, fps), _frame_id = self._shown if self._shown[0] else (self.env.status(), 0)
         cx, cy = self.at(24, 23)
         layer.circle(cx, cy, 5.5 * self.s, color)
-        self.text(layer, text, 38, 23, 15, weight="semibold", max_width=150 * self.s)
-        self.text(layer, fps, 230, 23, 12, MUTED, anchor="rm")
-        self.button(layer, "settings", 238, 8, 30, 30, radius=10)
-        layer.icon(ICON_SETTINGS, *self.at(253, 23), 14 * self.s, MUTED)
+        self.text(layer, text, 38, 23, 15, weight="semibold", max_width=158 * self.s)
+        for name, bx, glyph in (("notebook", 202, ICON_PEN), ("settings", 238, ICON_SETTINGS)):
+            self.button(layer, name, bx, 8, 30, 30, radius=10)
+            layer.icon(glyph, *self.at(bx + 15, 23), 14 * self.s, MUTED)
         x, y, w, h = self.PREVIEW
         px, py = self.at(x, y)
         frame = self.env.frame if self.env.camera_on() else None
@@ -308,6 +330,10 @@ class StatusWidget(Widget):
                 keep = fh * w // h
                 frame = frame[:, (fw - keep) // 2:(fw - keep) // 2 + keep]
             layer.image(frame, px, py, w * self.s, h * self.s, 12 * self.s)
+            if fps:                          # frames a second, in the corner of the picture
+                layer.round_rect(*self.at(x + w - 82, y + h - 28), 74 * self.s, 20 * self.s, 10 * self.s,
+                                 (0, 0, 0), 0.5)
+                self.text(layer, fps, x + w - 45, y + h - 18, 11, TEXT, anchor="mm")
         else:
             layer.round_rect(px, py, w * self.s, h * self.s, 12 * self.s, (0, 0, 0), 0.35)
             text = "Камера включается…" if self.env.camera_on() else "Камера выключена"
@@ -541,8 +567,206 @@ class ButtonsWidget(Widget):
             self.text(layer, self.error[0], self.PAD + 2, h - self.PAD - 4, 12, RED, max_width=250 * self.s)
 
 
+class NotebookWidget(Widget):
+    """A notebook to draw in, like Paint: pinch on the paper and move the hand (or drag the mouse).
+
+    Pen, marker, eraser and five colours; undo, clear the page, copy it as a picture
+    (then Ctrl+V anywhere), open the folder with the pages. ‹ › + go through the pages;
+    the corner button makes the notebook nearly as big as the screen.
+    """
+
+    ANYTIME, CENTRED = True, True
+    HEADER, TOOLBAR, PAD = 48, 60, 12
+    COMPACT_W, BIG_W = 600, 1400
+    TOOLS = (("pen", ICON_PEN), ("marker", ICON_MARKER), ("eraser", ICON_ERASER))
+    ACTIONS = (("undo", ICON_UNDO), ("clear", ICON_CLEAR), ("copy", ICON_COPY), ("folder", ICON_FOLDER))
+    NOTE_TIME = 2.0
+
+    def __init__(self, spec, env):
+        super().__init__(spec, env)
+        self.book = getattr(env, "notebook", None) or Notebook()
+        self.big = False
+        self._small_at = None        # where the compact notebook was before it grew
+        self._view = (None, None)    # (key, the page as BGRA at its size on screen)
+        self._shown = None           # (page, version) last drawn
+        self.note = None             # (text, until): «Скопировано»…
+
+    # layout, in logical pixels of the panel
+    def _paper_w(self):
+        if not self.big:
+            return self.COMPACT_W - 2 * self.PAD
+        sw, sh = winmouse.screen_size()
+        free_w, free_h = sw / self.s - 48, sh / self.s - 48
+        return max(300, min(self.BIG_W, free_w - 2 * self.PAD,
+                            (free_h - self.HEADER - self.TOOLBAR) * PAGE_W / PAGE_H))
+
+    def paper(self):
+        """(x, y, w, h) of the paper in the panel."""
+        w = int(self._paper_w())
+        return self.PAD, self.HEADER, w, round(w * PAGE_H / PAGE_W)
+
+    def logical_size(self):
+        _x, _y, w, h = self.paper()
+        return w + 2 * self.PAD, self.HEADER + h + self.TOOLBAR
+
+    def parts(self):
+        width, height = self.logical_size()
+        cx, ty = width / 2, height - self.TOOLBAR + 8
+        parts = [("paper", self.paper()),
+                 ("back", (cx - 88, 8, 32, 32)), ("forward", (cx + 16, 8, 32, 32)), ("add", (cx + 56, 8, 32, 32)),
+                 ("big", (width - self.PAD - 76, 8, 32, 32)), ("close", (width - self.PAD - 36, 8, 32, 32))]
+        parts += [(name, (self.PAD + 48 * i, ty, 44, 44)) for i, (name, _icon) in enumerate(self.TOOLS)]
+        parts += [(f"c{i}", (self.PAD + 160 + 44 * i, ty + 2, 40, 40)) for i in range(len(COLORS))]
+        last = len(self.ACTIONS) - 1
+        parts += [(name, (width - self.PAD - 44 - 48 * (last - i), ty, 44, 44))
+                  for i, (name, _icon) in enumerate(self.ACTIONS)]
+        return parts
+
+    def _page_point(self, x, y):
+        px, py, w, h = self.paper()
+        return (x - px) / w * PAGE_W, (y - py) / h * PAGE_H
+
+    # the mouse (from the window procedure: only state, no Tkinter)
+    def on_press(self, part, x, y):
+        if part == "paper":
+            self.book.begin(self._page_point(x, y))
+
+    def on_drag(self, part, x, y):
+        if part == "paper":
+            self.book.extend(self._page_point(x, y))
+            self.dirty = True
+
+    def on_release(self, part):
+        if part == "paper":
+            self.book.end()
+
+    def on_click(self, part):
+        book = self.book
+        if part in dict(self.TOOLS):
+            book.tool = part
+        elif part[0] == "c" and part[1:].isdigit():
+            book.color = COLORS[int(part[1:])]
+            if book.tool == "eraser":
+                book.tool = "pen"
+        elif part == "undo":
+            book.undo()
+        elif part == "clear":
+            book.clear()
+        elif part == "copy":
+            self.env.request(("copy_page", self))
+        elif part == "folder":
+            book.save()
+            if book.folder is not None:
+                self.env.request(("open_folder", book.folder))
+        elif part in ("back", "forward"):
+            book.go(-1 if part == "back" else 1)
+        elif part == "add":
+            book.add_page()
+        elif part == "big":
+            self._resize(not self.big)
+        elif part == "close":
+            book.save()
+            self.spec["on"] = False
+            self.env.changed()
+        self.dirty = True
+
+    def _resize(self, big):
+        if big:
+            self._small_at = (self.spec["x"], self.spec["y"])
+        self.big = big
+        self._base = None
+        if big:
+            sw, sh = winmouse.screen_size()
+            w, h = self.panel_size()
+            self.spec["x"], self.spec["y"] = (sw - w) // 2, (sh - h) // 2
+        elif self._small_at is not None:
+            self.spec["x"], self.spec["y"] = self._small_at
+        self.env.changed()
+
+    def show_note(self, text):
+        self.note = (text, time.perf_counter() + self.NOTE_TIME)
+        self.dirty = True
+
+    # drawing
+    def tick(self, now):
+        if self.note and now >= self.note[1]:
+            self.note = None
+            self.dirty = True
+        if self._shown != (self.book.index, self.book.page.version):
+            self.dirty = True
+
+    def draw_static(self, layer):
+        self.text(layer, "Блокнот", self.PAD + 8, 24, 15, weight="semibold")
+
+    def draw(self, layer, now):
+        book, s = self.book, self.s
+        self._shown = (book.index, book.page.version)
+        x, y, w, h = self.paper()
+        pw, ph = round(w * s), round(h * s)
+        self._paste(layer, self._page_view(pw, ph), *(round(v) for v in self.at(x, y)), round(10 * s))
+
+        width, _height = self.logical_size()
+        parts = dict(self.parts())
+        last = len(book.pages) - 1
+        for name, glyph in (("back", ICON_BACK), ("forward", ICON_FORWARD), ("add", ICON_ADD),
+                            ("big", ICON_SMALL if self.big else ICON_BIG), ("close", ICON_CLOSE)):
+            bx, by, bw, bh = parts[name]
+            usable = not (name == "back" and book.index == 0 or name == "forward" and book.index == last)
+            if usable:
+                self.button(layer, name, bx, by, bw, bh, radius=10)
+            layer.icon(glyph, *self.at(bx + bw / 2, by + bh / 2), 13 * s, MUTED if usable else DIM)
+        self.text(layer, f"{book.index + 1} / {len(book.pages)}", width / 2 - 20, 24, 13, weight="semibold",
+                  anchor="mm")
+        if self.note:
+            right = width - self.PAD - 84
+            self.text(layer, self.note[0], right, 24, 12, MUTED, anchor="rm",
+                      max_width=(right - width / 2 - 96) * s)
+
+        for name, glyph in self.TOOLS:
+            bx, by, bw, bh = parts[name]
+            if book.tool == name:
+                layer.round_rect(*self.at(bx, by), bw * s, bh * s, 12 * s, self.accent(), 0.9)
+            else:
+                self.button(layer, name, bx, by, bw, bh)
+            layer.icon(glyph, *self.at(bx + bw / 2, by + bh / 2), 18 * s, TEXT)
+        for i, color in enumerate(COLORS):
+            bx, by, bw, bh = parts[f"c{i}"]
+            cx, cy = self.at(bx + bw / 2, by + bh / 2)
+            if book.color == color and book.tool != "eraser":
+                layer.circle(cx, cy, 17 * s, (255, 255, 255), 0.9)
+            elif self.hover == f"c{i}":
+                layer.circle(cx, cy, 17 * s, (255, 255, 255), 0.35)
+            layer.circle(cx, cy, 13 * s, color)
+        for name, glyph in self.ACTIONS:
+            bx, by, bw, bh = parts[name]
+            self.button(layer, name, bx, by, bw, bh)
+            layer.icon(glyph, *self.at(bx + bw / 2, by + bh / 2), 17 * s, TEXT)
+
+    def _page_view(self, w, h):
+        """The page scaled to the paper on screen, as opaque BGRA (made again only when it changed)."""
+        key = (self.book.index, self.book.page.version, w, h)
+        if self._view[0] != key:
+            image = cv2.resize(self.book.page.image, (w, h), interpolation=cv2.INTER_AREA)
+            self._view = (key, cv2.cvtColor(image, cv2.COLOR_RGB2BGRA))
+        return self._view[1]
+
+    @staticmethod
+    def _paste(layer, bgra, x, y, r):
+        """Copy an opaque picture in; only its rounded corners are blended with what is below."""
+        h, w = bgra.shape[:2]
+        region = layer.pixels[y:y + h, x:x + w]
+        mask = round_mask(w, h, r)
+        corners = [(slice(0, r), slice(0, r)), (slice(0, r), slice(w - r, w)),
+                   (slice(h - r, h), slice(0, r)), (slice(h - r, h), slice(w - r, w))]
+        below = [np.ascontiguousarray(region[c]) for c in corners]
+        np.copyto(region, bgra)
+        for c, under in zip(corners, below):
+            m = np.ascontiguousarray(mask[c])
+            region[c] = cv2.blendLinear(under, np.ascontiguousarray(bgra[c]), 1 - m, m)
+
+
 WIDGET_CLASSES = {"status": StatusWidget, "clock": ClockWidget, "volume": VolumeWidget, "media": MediaWidget,
-                  "system": SystemWidget, "buttons": ButtonsWidget}
+                  "system": SystemWidget, "buttons": ButtonsWidget, "notebook": NotebookWidget}
 
 
 # -- cursor ring --------------------------------------------------------------------------
@@ -622,6 +846,7 @@ class OnScreen:
         self._event = 0
         self._save = False
         self._closed = False
+        self.notebook = Notebook(settings_file.SETTINGS_DIR / "notebook")   # pages load when first shown
         self.settings.widgets = clean_specs(self.settings.widgets)
         self.rebuild()
         self.app.after(200, self._tick)
@@ -664,6 +889,20 @@ class OnScreen:
         self.settings.widgets_on = not self.settings.widgets_on
         self._save = True
 
+    def toggle_notebook(self):
+        """Open or close the notebook (opening also shows the widgets if they were hidden)."""
+        for widget, _window in self.items:
+            if widget.spec["type"] == "notebook":
+                widget.spec["on"] = not widget.spec["on"]
+                widget.dirty = True
+                if widget.spec["on"]:
+                    self.settings.widgets_on = True
+                else:
+                    self.notebook.save()
+                self._save = True
+                return widget.spec["on"]
+        return False
+
     def rebuild(self):
         """Recreate the widgets from settings.widgets (after the editor changed them)."""
         for _widget, window in self.items:
@@ -694,7 +933,8 @@ class OnScreen:
             widget.dirty = True
 
     def arrange(self, only_new=False):
-        """Put widgets in a column along the right edge of the main screen (only_new: those without a place)."""
+        """Put widgets in a column along the right edge of the main screen (only_new: those without a place).
+        A big one (the notebook) goes in the middle of the screen instead."""
         sw, sh = winmouse.screen_size()
         margin, gap = round(24 * self.s), round(12 * self.s)
         x_right, y = sw - margin, margin
@@ -703,6 +943,10 @@ class OnScreen:
             if only_new and "x" in widget.spec and "y" in widget.spec:
                 continue
             w, h = widget.panel_size()
+            if widget.CENTRED:
+                widget.spec["x"], widget.spec["y"] = max((sw - w) // 2, 0), max((sh - h) // 2, 0)
+                widget.dirty = True
+                continue
             if y + h > sh - margin and y > margin:      # next column to the left
                 x_right -= column_w + gap
                 y, column_w = margin, 0
@@ -714,6 +958,7 @@ class OnScreen:
 
     def close(self):
         self._closed = True
+        self.notebook.save()
         for _widget, window in self.items:
             window.destroy()
         self.items = []
@@ -747,10 +992,12 @@ class OnScreen:
             self._toggles = tracker.widget_toggles
 
         always = tuning.get(self.settings, "widgets_always")
-        show = (running or always) and self.settings.widgets_on
+        on = self.settings.widgets_on
+        show = False
         first = 1   # widgets drawn for the first time this tick: tens of ms each, so one per tick
         for widget, window in self.items:
-            if show and widget.spec["on"]:
+            if on and widget.spec["on"] and (running or always or widget.ANYTIME):
+                show = True
                 widget.tick(now)
                 if widget.dirty or not window.visible:
                     if widget._base is None:
@@ -763,6 +1010,7 @@ class OnScreen:
                 window.hide()
 
         ring = self._update_ring(now, tracker, running)
+        self.notebook.save_if_due(now)
         self._run_requests()
         if self._save:
             self._save = False
@@ -805,3 +1053,14 @@ class OnScreen:
                 system.press_keys(item[1])
             elif item[0] == "editor":
                 self.app.open_widget_editor()
+            elif item[0] == "notebook":
+                self.toggle_notebook()
+            elif item[0] == "copy_page":
+                widget = item[1]
+                widget.show_note("Скопировано: вставьте Ctrl+V" if widget.book.copy() else "Не удалось скопировать")
+            elif item[0] == "open_folder":
+                try:
+                    item[1].mkdir(parents=True, exist_ok=True)
+                    os.startfile(item[1])
+                except OSError:
+                    pass

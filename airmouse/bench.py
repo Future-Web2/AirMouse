@@ -237,17 +237,48 @@ def onscreen_widgets(scale=1.5, frames=30):
 
     everything = []
     for spec in onscreen.default_widgets():
+        if spec["type"] == "notebook":       # measured on its own below
+            continue
         widget = onscreen.WIDGET_CLASSES[spec["type"]](dict(spec, x=0, y=0), env)
         widget.tick(0.0)
         everything.append(widget)
     t = time.perf_counter()
     for widget in everything:
         widget.render(0.0).bgra()
-    return {
+    report = {
         "status_with_camera": _timed(status_frame, frames),
         "cursor_ring": _timed(ring_frame, frames),
         "all_widgets_once_ms": round((time.perf_counter() - t) * 1000, 1),
     }
+    report.update(notebook_drawing(env, frames))
+    return report
+
+
+def notebook_drawing(env, frames=30):
+    """The notebook redrawn after each bit of a stroke, as while drawing, small and nearly full screen."""
+    from . import onscreen
+    notebook = onscreen.NotebookWidget({"type": "notebook", "on": True, "x": 0, "y": 0}, env)
+    t = time.perf_counter()
+    notebook.render(0.0).bgra()
+    first = round((time.perf_counter() - t) * 1000, 1)
+    step = [0]
+
+    def stroke_frame():
+        px, py, pw, ph = notebook.paper()
+        step[0] += 1
+        x, y = px + 20 + (step[0] * 7) % (pw - 40), py + ph / 2 + ((step[0] % 20) - 10) * 4
+        if step[0] == 1:
+            notebook.on_press("paper", x, y)
+        else:
+            notebook.on_drag("paper", x, y)
+        notebook.render(0.0).bgra()
+
+    small = _timed(stroke_frame, frames)
+    notebook._resize(True)
+    notebook.render(0.0)
+    big = _timed(stroke_frame, frames)
+    notebook.on_release("paper")
+    return {"notebook_first_ms": first, "notebook_stroke": small, "notebook_big_stroke": big}
 
 
 # -- tracking ---------------------------------------------------------------------------

@@ -22,8 +22,9 @@ from .widgets import MUTED, TEXT, Button, Segmented, Slider, Stepper, Toggle, se
 W, H = 1120, 840                         # logical size of the window
 SIDEBAR = (W - 16 - 376, 16, 376, H - 32)
 STATUS = (16, 16, 310, 50)
-WIDGETS_BUTTON = (338, 16, 150, 50)
-ADVANCED_BUTTON = (500, 16, 160, 50)
+WIDGETS_BUTTON = (338, 16, 118, 50)
+NOTEBOOK_BUTTON = (468, 16, 118, 50)
+ADVANCED_BUTTON = (598, 16, 118, 50)
 SESSION = (16, 80, 310, 118)
 CARD_W = 480
 IDLE_FPS = 12     # window redraws per second while another window is active (in front: «Частота окна»)
@@ -132,12 +133,13 @@ class App(BaseApp):
                                 st.design, lambda d: self.after(250, self._switch_design, d))
         self.calibrate_btn = Button(x0, 746, cw, 44, "", self._calibrate, size=15)
         self.widgets_btn = Button(*WIDGETS_BUTTON, "Виджеты", self.open_widget_editor, size=15)
+        self.notebook_btn = Button(*NOTEBOOK_BUTTON, "Блокнот", self.toggle_notebook, size=15)
         self.advanced_btn = Button(*ADVANCED_BUTTON, "Подробнее", self.open_advanced, size=15)
 
     def _widgets(self):
         return [self.segmented, self.start_btn, self.control_toggle, self.camera_stepper, *self.sliders,
                 self.invert_toggle, self.top_toggle, self.design, self.calibrate_btn, self.widgets_btn,
-                self.advanced_btn]
+                self.notebook_btn, self.advanced_btn]
 
     def scale(self):
         return self.s
