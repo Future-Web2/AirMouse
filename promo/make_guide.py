@@ -50,15 +50,21 @@ from airmouse.ui import THEMES  # noqa: E402
 NATURE = THEMES["nature"]
 GREEN = NATURE["accent"]
 MUTED = (204, 222, 208)
-P.MUTED, P.ACCENT = MUTED, GREEN          # the promo's helpers draw with these
-P.PROMO_STYLES.update({
-    "panel": STYLES["fog_panel"],
-    "button": STYLES["fog_button"],
-    "hero": dict(blur=16, refraction=1.2, dispersion=0.15, tint=(14, 34, 22), tint_alpha=0.38, saturation=1.15,
-                 rim=1.1, sheen=0.12, shadow=0.35, haze=0.1, droplets=0.8),
-    "caption": dict(blur=10, refraction=1.2, dispersion=0.15, tint=(12, 30, 20), tint_alpha=0.52, saturation=1.1,
-                    rim=1.0, sheen=0.1, shadow=0.3, haze=0.06, droplets=0.35),
-})
+
+
+def nature_look():
+    """Draw the promo's glass as fogged glass with condensation (the posters import this file without it)."""
+    P.MUTED, P.ACCENT = MUTED, GREEN          # the promo's helpers draw with these
+    P.PROMO_STYLES.update({
+        "panel": STYLES["fog_panel"],
+        "button": STYLES["fog_button"],
+        "hero": dict(blur=16, refraction=1.2, dispersion=0.15, tint=(14, 34, 22), tint_alpha=0.38, saturation=1.15,
+                     rim=1.1, sheen=0.12, shadow=0.35, haze=0.1, droplets=0.8),
+        "caption": dict(blur=10, refraction=1.2, dispersion=0.15, tint=(12, 30, 20), tint_alpha=0.52,
+                        saturation=1.1, rim=1.0, sheen=0.1, shadow=0.3, haze=0.06, droplets=0.35),
+    })
+
+
 # What the camera sees behind the hand: a blurred room.
 ROOM = dict(colors=((0.55, 0.47, 0.38), (0.32, 0.28, 0.26), (0.78, 0.68, 0.52), (0.22, 0.24, 0.27),
                     (0.62, 0.58, 0.50)), base=(0.10, 0.09, 0.08))
@@ -1002,6 +1008,7 @@ def main():
     args = parser.parse_args()
     cv2.setNumThreads(0)
 
+    nature_look()
     scenes, duration, clicks = build_timeline()
     backdrop = LiquidBackdrop(W, P.H, seed=5, **NATURE["backdrop"])
     if args.stills:

@@ -100,8 +100,21 @@
 - [`promo/POST.md`](promo/POST.md) — готовые тексты поста для Telegram, VK, YouTube и X.
 - [`promo/AirMouse_promo.mp4`](promo/AirMouse_promo.mp4) — промо-ролик 1920×1080 длиной около 53 секунд, с музыкой.
 - [`promo/AirMouse_poster.png`](promo/AirMouse_poster.png) — постер 1440×1800 (4:5) для публикации в Telegram. Пересобрать: `.venv\Scripts\python.exe promo\make_poster.py`.
+- [`promo/carousel/`](promo/carousel/) — карусель из 8 картинок 1440×1800 в том же стиле:
+  - обложка;
+  - жесты;
+  - глаза и голова;
+  - виджеты;
+  - блокнот;
+  - точность в цифрах;
+  - три дизайна;
+  - как скачать, с QR-кодом.
+
+  Там же все страницы одним PDF. Пересобрать: `.venv\Scripts\python.exe promo\make_carousel.py`, для QR-кода нужен `pip install segno`.
 
 <img src="promo/AirMouse_poster.png" width="360" alt="Постер AirMouse">
+
+![Карусель AirMouse](promo/carousel/overview.jpg)
 
 Ролики целиком сгенерированы скриптами:
 

@@ -59,6 +59,32 @@ Ctrl+Alt+M — пауза, Ctrl+Alt+W — виджеты.
 
 **Теги:** AirMouse, управление жестами, мышь без рук, веб-камера, Windows 11, MediaPipe
 
+## Карусель из 8 картинок (Instagram, Telegram, VK)
+
+Картинки лежат в [`carousel/`](carousel/), по порядку от `AirMouse_01.jpg` до `AirMouse_08.jpg`:
+
+1. обложка;
+2. жесты рукой;
+3. глаза и голова;
+4. виджеты;
+5. блокнот;
+6. точность в цифрах;
+7. три дизайна;
+8. как скачать, с QR-кодом.
+
+В Telegram отправьте все 8 одним альбомом, текст подпишите к первой картинке. Для LinkedIn или рассылки подойдёт тот же набор одним файлом: [`carousel/AirMouse_carousel.pdf`](carousel/AirMouse_carousel.pdf).
+
+```text
+🖐 AirMouse — мышь, которой управляете вы
+
+Листайте: жесты рукой, управление глазами и головой, виджеты на экране, блокнот для рисования и три дизайна.
+
+Бесплатно для Windows 10 и 11, нужна только веб-камера.
+Скачать: github.com/Future-Web2/AirMouse/releases
+
+#AirMouse #Windows #жесты #вебкамера
+```
+
 ## English (short)
 
 ```text
@@ -67,7 +93,8 @@ AirMouse turns an ordinary webcam into a mouse: move the cursor with your hand, 
 
 ## Что ещё приложить
 
-- [`AirMouse_poster.png`](AirMouse_poster.png) — постер 4:5 для Telegram и Instagram.
+- [`AirMouse_poster.png`](AirMouse_poster.png) — постер 4:5 для Telegram и Instagram, когда нужна одна картинка.
+- [`carousel/`](carousel/) — та же тема в 8 картинках 4:5, текст к ним — выше.
 - [`AirMouse_promo.mp4`](AirMouse_promo.mp4) — промо-ролик на 53 секунды, без инструкции.
 - Скриншоты: [`docs/screenshot_nature.png`](../docs/screenshot_nature.png) (дизайн «Природа»), [`docs/screenshot_widgets.png`](../docs/screenshot_widgets.png) (виджеты), [`docs/screenshot_advanced.png`](../docs/screenshot_advanced.png) («Подробнее»).
 

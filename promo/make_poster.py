@@ -3,7 +3,8 @@
     python promo/make_poster.py
 
 Same Liquid Glass look as the app and the promo video; the window in the middle
-is the real app window (rendered through airmouse/ui.py).
+is the real app window (rendered through airmouse/ui.py, never shown on the screen).
+promo/make_carousel.py makes the 8-slide version in the same look.
 """
 
 import math
@@ -16,7 +17,7 @@ from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from make_promo import (  # noqa: E402
-    MUTED, ROOT, TEXT, AppShowcase, app_icon, blend, eye, fill_round, glass, rounded_rect_sdf, text, text_width,
+    MUTED, ROOT, TEXT, app_icon, blend, eye, fill_round, glass, rounded_rect_sdf, text, text_width,
 )
 from airmouse.glass import LiquidBackdrop  # noqa: E402
 
@@ -57,12 +58,24 @@ def head_icon(frame, cx, cy, r):
 
 
 def app_window(frame, x, y, w):
-    """The real app window, scaled to width w, with a title bar and a shadow."""
-    AppShowcase.SCALE = 1.1
-    show = AppShowcase()
-    show(np.zeros((1080, 1920, 3), np.uint8), 0.6)   # hand mode, a moment in
-    img = show.image
-    show.app.root.destroy()
+    """The real app window (hand mode, camera on), scaled to width w, with a title bar and a shadow.
+    It is drawn off the screen (make_guide.make_app): no window appears."""
+    from make_guide import fake_tracker, make_app, render_app
+
+    from airmouse import bench
+    from airmouse.settings import Settings
+    from airmouse.tracker import Tracker
+    app = make_app("glass", 1.1)
+    camera = LiquidBackdrop(640, 480, seed=11).render(2.78)
+    overlay = Tracker(Settings())
+    overlay.kind, overlay.mode = "hand", "move"
+    overlay._publish_preview(np.ascontiguousarray(camera[:, :, ::-1]), bench.hand(328, 241), 1920, 1080)
+    app.tracker, app._has_frame = fake_tracker(), True
+    app._show_running(True)
+    app._camera_bg = app._cover(overlay.take_preview())
+    img = render_app(app, 3.0).copy()
+    app.onscreen.close()
+    app.root.destroy()
     h = round(img.shape[0] * w / img.shape[1])
     img = cv2.resize(img, (w, h), interpolation=cv2.INTER_AREA)
     bar = round(u(32))
@@ -103,8 +116,7 @@ def main():
         text(frame, label, u(x + 120), u(cy), u(36), weight="bold", anchor="lm")
         x += chip_w + gap
 
-    text(frame, "Щипок — клик   ·   Моргнул — клик   ·   Дрожь 53 px → 8 px", W / 2, u(1248), u(27), TEXT,
-         "semibold")
+    text(frame, "Щипок — клик   ·   Виджеты на экране   ·   Блокнот", W / 2, u(1248), u(27), TEXT, "semibold")
     pill_w = text_width(REPO, "semibold", u(26)) + u(64)
     glass(pill_w, u(58), u(29), "button").draw(frame, W / 2 - pill_w / 2, u(1296) - u(29))
     text(frame, REPO, W / 2, u(1296), u(26), weight="semibold")
