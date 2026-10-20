@@ -98,4 +98,22 @@ AirMouse turns an ordinary webcam into a mouse: move the cursor with your hand, 
 - [`AirMouse_promo.mp4`](AirMouse_promo.mp4) — промо-ролик на 53 секунды, без инструкции.
 - Скриншоты: [`docs/screenshot_nature.png`](../docs/screenshot_nature.png) (дизайн «Природа»), [`docs/screenshot_widgets.png`](../docs/screenshot_widgets.png) (виджеты), [`docs/screenshot_advanced.png`](../docs/screenshot_advanced.png) («Подробнее»).
 
-Видео горизонтальное (16:9): для ленты Telegram, VK, YouTube и X. Для Reels, Shorts и TikTok нужна вертикальная версия 9:16, её пока нет.
+Гайд горизонтальный (16:9): для ленты Telegram, VK, YouTube и X.
+
+## Reels, Shorts, TikTok — вертикальное видео
+
+[`AirMouse_vertical.mp4`](AirMouse_vertical.mp4) — 36 секунд, 1080×1920 (9:16), в сине-бирюзовом стиле постера. По сценам:
+
+1. крючок «Компьютер без мыши?»;
+2. настоящий движок жестов на рабочем столе;
+3. виджеты;
+4. блокнот;
+5. точность в цифрах;
+6. ссылка с QR-кодом.
+
+Музыка — свой современный бит (120 BPM), его можно публиковать где угодно без проблем с правами. Чтобы поставить трендовый трек, добавьте его в редакторе Reels, TikTok или Shorts и уберите громкость оригинального звука до нуля. Популярные песни так можно ставить законно, а вшивать их в файл нельзя.
+
+```text
+Компьютер без мыши? 🖐 Просто рукой в воздухе: щипок — клик, два пальца — прокрутка, палец вверх — виджеты, а ещё блокнот для рисования. AirMouse — бесплатно для Windows, нужна только веб-камера. Ссылка в профиле: github.com/Future-Web2/AirMouse
+#AirMouse #Windows #лайфхак #компьютер #жесты
+```

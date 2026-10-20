@@ -111,6 +111,7 @@
   - как скачать, с QR-кодом.
 
   Там же все страницы одним PDF. Пересобрать: `.venv\Scripts\python.exe promo\make_carousel.py`, для QR-кода нужен `pip install segno`.
+- [`promo/AirMouse_vertical.mp4`](promo/AirMouse_vertical.mp4) — вертикальное видео для Reels, Shorts и TikTok: 36 секунд, 1080×1920, в том же стиле. Музыка — свой бит, его можно публиковать без проблем с правами. Пересобрать: `.venv\Scripts\python.exe promo\make_vertical.py`.
 
 <img src="promo/AirMouse_poster.png" width="360" alt="Постер AirMouse">
 
@@ -128,6 +129,7 @@
 .venv\Scripts\python.exe -m pip install imageio-ffmpeg
 .venv\Scripts\python.exe promo\make_promo.py
 .venv\Scripts\python.exe promo\make_guide.py
+.venv\Scripts\python.exe promo\make_vertical.py
 ```
 
 Отдельные кадры для проверки: `promo\make_guide.py --stills 8,30,60`.
