@@ -93,15 +93,18 @@ class HandFeatures:
     """Measurements of one hand that do not depend on its distance from the camera."""
 
     def __init__(self, pts):
-        size = max(_dist(pts[WRIST], pts[MIDDLE_MCP]), 1e-6)
+        self.size = size = max(_dist(pts[WRIST], pts[MIDDLE_MCP]), 1e-6)
         self.pinch_index = _dist(pts[THUMB_TIP], pts[INDEX_TIP]) / size
         self.pinch_middle = _dist(pts[THUMB_TIP], pts[MIDDLE_TIP]) / size
         straight = [_extended(pts, tip, pip) for tip, pip in
                     ((INDEX_TIP, INDEX_PIP), (MIDDLE_TIP, MIDDLE_PIP), (RING_TIP, RING_PIP), (PINKY_TIP, PINKY_PIP))]
         self.two_fingers = straight == [True, True, False, False]
-        # Thumbs up: a fist with the thumb standing well above it.
+        self.open = all(straight)
+        # Thumbs up / down: a fist with the thumb standing well above / below it.
         self.thumb_up = not any(straight) and (
             pts[THUMB_TIP][1] < min(p[1] for p in pts[INDEX_MCP:]) - THUMB_ABOVE * size)
+        self.thumb_down = not any(straight) and (
+            pts[THUMB_TIP][1] > max(p[1] for p in pts[INDEX_MCP:]) + THUMB_ABOVE * size)
         self.palm = palm_center(pts)
 
 

@@ -55,6 +55,8 @@ GESTURES = {
         ("Большой + два пальца", "правый клик"),
         ("Два пальца вверх / вниз", "прокрутка"),
         ("Большой палец вверх", "показать / скрыть виджеты"),
+        ("Вторая рука: щипок", "клик; держать — перетащить"),
+        ("Развести / свести руки", "все окна / свернуть все"),
     ),
     "gaze": (
         ("Взгляд", "переносит курсор, куда смотрите"),
@@ -136,6 +138,7 @@ class BaseApp:
         self._hotkey_was_down = False
         self._widgets_key_was_down = False
         self._notebook_key_was_down = False
+        self._pause_toggles = 0         # the tracker's pause gestures already shown
         self._calibrate_left = 0
         self.session = Session()
         self.onscreen = None       # the on-screen widgets, created once the window exists
@@ -336,7 +339,13 @@ class BaseApp:
         tracker = self.tracker
         self.session.sample(tracker if self._has_frame else None, time.perf_counter())
         if tracker is None:
+            self._pause_toggles = 0
             return
+        toggles = getattr(tracker, "pause_toggles", 0)
+        if toggles != self._pause_toggles:       # paused or resumed by both thumbs up
+            self._pause_toggles = toggles
+            self.control = tracker.control_enabled
+            self._show_control(self.control)
         if tracker.error:
             error = tracker.error
             self._stop()

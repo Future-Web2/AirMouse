@@ -794,10 +794,10 @@ class AdvancedScene:
     LENGTH = 10.0
     SCALE = 0.62
     APP_POS = (150, 330)
-    K = 1.15                                # the dialog picture, enlarged a little for the video
+    K = 1.0                                 # the dialog picture at its own size (seven tabs: it is big)
     SHOTS = ("camera", "camera60", "cursor", "clicks")
     SWITCH = (3.5, 5.6, 7.5)                # the picture changes to the next shot
-    NOTES = ((0.4, "«Подробнее» — 23 параметра в 6 вкладках"), (3.4, "60 кадр/с — курсор точнее и отзывчивее"),
+    NOTES = ((0.4, "«Подробнее» — 29 параметров в 7 вкладках"), (3.4, "60 кадр/с — курсор точнее и отзывчивее"),
              (5.8, "Курсор, клики, жесты, пороги лица"), (7.8, "«По умолчанию» вернёт всё как было"))
 
     def __init__(self, camera):

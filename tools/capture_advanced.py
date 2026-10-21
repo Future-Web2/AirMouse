@@ -171,7 +171,7 @@ def main():
     pump(0.3)
     capture(win, "advanced_camera60.png")
     app.root.setvar(variable, format_value(param, param.default))
-    for index, name in ((1, "cursor"), (2, "clicks")):
+    for index, name in ((1, "cursor"), (2, "clicks"), (len(tuning.GROUPS) - 1, "access")):
         notebook.select(index)
         pump(0.4)
         capture(win, f"advanced_{name}.png")

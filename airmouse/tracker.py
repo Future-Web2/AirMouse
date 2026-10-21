@@ -12,12 +12,10 @@ from functools import lru_cache
 import cv2
 import numpy as np
 
-from . import resource_path, tuning, winmouse
+from . import resource_path, system, tuning, winmouse
 from .face import EYES, EYES_CLOSED, NO_FACE, NOSE_TIP, FaceEngine, read_face
-from .gestures import (
-    DRAG, MOVE, NO_HAND, PENDING, PRESSED, RIGHT, SCROLL,
-    GestureEngine, palm_center, zone_rect,
-)
+from .gestures import DRAG, MOVE, NO_HAND, PENDING, PRESSED, RIGHT, SCROLL, palm_center, zone_rect
+from .twohands import Dwell, HandControl
 
 HAND_MODEL = "models/hand_landmarker.task"
 FACE_MODEL = "models/face_landmarker.task"
@@ -44,6 +42,7 @@ MODE_COLORS = {
     SCROLL: (255, 170, 50),
 }
 PAUSED_COLOR = (150, 150, 150)
+BUTTON_HAND_COLOR = (240, 190, 90)    # the second hand, the one with the buttons
 
 
 def mediapipe():
@@ -86,8 +85,9 @@ def face_connections():
     ]
 
 
-def create_landmarker(kind="hand", confidence=0.6):
-    """kind: "hand", or "gaze" / "head" for the face model. confidence: how sure the hand model must be."""
+def create_landmarker(kind="hand", confidence=0.6, hands=1):
+    """kind: "hand", or "gaze" / "head" for the face model. confidence: how sure the hand model must be.
+    hands: how many hands to look for (2: a second hand for the buttons, see twohands.py)."""
     mediapipe()
     from mediapipe.tasks.python import BaseOptions
     from mediapipe.tasks.python.vision import (
@@ -98,7 +98,7 @@ def create_landmarker(kind="hand", confidence=0.6):
         return HandLandmarker.create_from_options(HandLandmarkerOptions(
             base_options=BaseOptions(model_asset_buffer=resource_path(HAND_MODEL).read_bytes()),
             running_mode=RunningMode.VIDEO,
-            num_hands=1,
+            num_hands=hands,
             min_hand_detection_confidence=confidence,
             min_hand_presence_confidence=confidence,
             min_tracking_confidence=confidence,
@@ -152,7 +152,8 @@ class Tracker:
 
     The UI reads `mode`, `fps`, `palm`, `face`, `error` and `take_preview()`;
     it sets `control_enabled` to pause or resume mouse control. For the
-    on-screen widgets: `progress`, `stats`, `events` and `widget_toggles`.
+    on-screen widgets: `progress`, `stats`, `events` and `widget_toggles`. Hand gestures can pause and
+    resume control themselves: `pause_toggles` counts them.
     """
 
     def __init__(self, settings):
@@ -168,6 +169,7 @@ class Tracker:
         self.stats = Counter()            # done this run: "left" and "right" clicks, "wheel" steps
         self.events = deque(maxlen=32)    # (number, time, action) of clicks, presses and scroll steps
         self.widget_toggles = 0           # thumbs-up gestures so far
+        self.pause_toggles = 0            # pause / resume gestures so far (both thumbs up)
         self._event_number = 0
         self._preview = None
         self._recenter = False
@@ -203,12 +205,14 @@ class Tracker:
             s = self.settings
             cap = _open_camera(s.camera_index, tuning.get(s, "camera_width"), tuning.get(s, "camera_fps"))
             mp = mediapipe()
-            landmarker = create_landmarker(self.kind, tuning.get(s, "hand_confidence"))
+            hand_count = 2 if tuning.get(s, "two_hands") else 1
+            landmarker = create_landmarker(self.kind, tuning.get(s, "hand_confidence"), hand_count)
             sw, sh = winmouse.screen_size()
             if self.kind == "hand":
-                engine = GestureEngine(self.settings, sw, sh)
+                control = HandControl(self.settings, sw, sh)
             else:
                 engine = FaceEngine(self.settings, sw, sh, use_gaze=self.kind == "gaze")
+                dwell = Dwell(self.settings, sw)
             t0 = last_t = time.perf_counter()
             last_ms = -1
             failures = 0
@@ -231,12 +235,14 @@ class Tracker:
                 rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                 result = landmarker.detect_for_video(mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb), ms)
 
+                second = None
                 if self.kind == "hand":
-                    pts = None
-                    if result.hand_landmarks:
-                        pts = [(p.x * w, p.y * h, p.z * w) for p in result.hand_landmarks[0]]
+                    hands = [[(p.x * w, p.y * h, p.z * w) for p in marks] for marks in result.hand_landmarks]
+                    actions = control.update(hands, w, h, t, winmouse.cursor_pos(), self.control_enabled)
+                    pts, second = control.pointer, control.second
                     self.palm = (palm_center(pts)[0] / w, palm_center(pts)[1] / h) if pts else None
-                    observation = (pts, w, h)
+                    self._perform(actions, mouse, t)
+                    self.mode, self.progress = control.mode, control.progress
                 else:
                     pts = face = None
                     if result.face_landmarks:
@@ -247,22 +253,24 @@ class Tracker:
                     if self._recenter:
                         self._recenter = False
                         engine.recenter()
-                    observation = (face,)
-
-                if self.control_enabled:
-                    for action in engine.update(*observation, t, winmouse.cursor_pos()):
-                        if action[0] == "widgets":
-                            self.widget_toggles += 1
+                    if self.control_enabled:
+                        here = winmouse.cursor_pos()
+                        actions = engine.update(face, t, here)
+                        for action in actions:
+                            if action[0] == "move":
+                                here = action[1:]
+                        if any(a[0] in ("click", "down", "up", "wheel") for a in actions):
+                            dwell.disarm(here)
                         else:
-                            mouse.do(action)
-                            self._note(action, t)
-                else:
-                    for action in engine.release_all():
-                        mouse.do(action)
-                self.mode = engine.mode
-                self.progress = engine.pinch if self.kind == "hand" else engine.progress
+                            actions += dwell.update(here, t, face is not None and engine.mode == MOVE)
+                    else:
+                        actions = engine.release_all()
+                        dwell.reset()
+                    self._perform(actions, mouse, t)
+                    self.mode = engine.mode
+                    self.progress = max(engine.progress, dwell.progress)
 
-                self._publish_preview(frame, pts, sw, sh)
+                self._publish_preview(frame, pts, sw, sh, second)
                 dt = t - last_t
                 last_t = t
                 if dt > 0:
@@ -276,6 +284,22 @@ class Tracker:
             if cap is not None:
                 cap.release()
 
+    def _perform(self, actions, mouse, t):
+        for action in actions:
+            kind = action[0]
+            if kind == "widgets":
+                self.widget_toggles += 1
+            elif kind == "pause":
+                self.control_enabled = not self.control_enabled
+                self.pause_toggles += 1
+            elif kind == "keys":
+                system.press_keys(action[1])
+            elif kind == "window":
+                system.window_command(action[1])
+            else:
+                mouse.do(action)
+                self._note(action, t)
+
     def _note(self, action, t):
         """Count what was done and keep it for the cursor ring (which flashes on clicks)."""
         kind = action[0]
@@ -288,7 +312,8 @@ class Tracker:
         self._event_number += 1
         self.events.append((self._event_number, t, action))
 
-    def _publish_preview(self, frame, pts, screen_w, screen_h):
+    def _publish_preview(self, frame, pts, screen_w, screen_h, second=None):
+        """Draw the hand (and the second hand, if any) or the face on the frame and keep it for the UI."""
         h, w = frame.shape[:2]
         color = MODE_COLORS.get(self.mode, MODE_COLORS[MOVE]) if self.control_enabled else PAUSED_COLOR
         if self.kind == "hand":
@@ -304,7 +329,13 @@ class Tracker:
             px, py = palm_center(pts)
             cv2.circle(frame, (int(px), int(py)), 9, color, -1, cv2.LINE_AA)
             cv2.circle(frame, (int(px), int(py)), 9, (255, 255, 255), 2, cv2.LINE_AA)
-        elif pts:
+        if second and self.kind == "hand":
+            points = [(int(p[0]), int(p[1])) for p in second]
+            for a, b in HAND_CONNECTIONS:
+                cv2.line(frame, points[a], points[b], BUTTON_HAND_COLOR, 2, cv2.LINE_AA)
+            for p in points:
+                cv2.circle(frame, p, 3, (255, 255, 255), -1, cv2.LINE_AA)
+        if pts and self.kind != "hand":
             points = [(int(p[0]), int(p[1])) for p in pts]
             for a, b in face_connections():
                 cv2.line(frame, points[a], points[b], color, 1, cv2.LINE_AA)

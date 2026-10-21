@@ -314,7 +314,7 @@ def slide_precision(stability):
     text(frame, "Курсор", sx, y + u(260), u(26), MUTED, "semibold", "lm")
     text(frame, f"{stability.cur_span:.0f} px", sx, y + u(320), u(70), CYAN, "bold", "lm")
     tiles = (("20 из 20", "щипков — ровно 20 кликов"), ("0", "ложных кликов за минуту дрожи"),
-             ("153", "автотеста при каждом изменении"), ("Офлайн", "камера обрабатывается на компьютере"))
+             ("172", "автотеста при каждом изменении"), ("Офлайн", "камера обрабатывается на компьютере"))
     for i, (big, small) in enumerate(tiles):
         tx, ty = u(60 + (i % 2) * 490), u(750 + (i // 2) * 236)
         glass(u(470), u(216), u(40), "caption").draw(frame, tx, ty)
@@ -327,7 +327,7 @@ def slide_precision(stability):
 
 def slide_tuning():
     frame = backdrop(21.0)
-    title(frame, "Тонкая настройка", "23 параметра: больше или меньше — как вам удобно")
+    title(frame, "Тонкая настройка", "29 параметров: больше или меньше — как вам удобно")
     shot = cv2.cvtColor(cv2.imread(str(G.GUIDE / "advanced_camera60.png")), cv2.COLOR_BGR2RGB)
     k = u(560) / shot.shape[1]
     shot = cv2.resize(shot, (round(shot.shape[1] * k), round(shot.shape[0] * k)), interpolation=cv2.INTER_AREA)
@@ -336,7 +336,7 @@ def slide_tuning():
     bx, by, bw, bh = (v * k for v in G.json.loads((G.GUIDE / "advanced.json").read_text(encoding="utf-8"))["camera_fps"])
     G.outline(frame, x + bx, y + by, bw, bh, 8, ACCENT, 0.95, 5)
     cards = (("60 кадр/с", "курсор точнее и отзывчивее"), ("Мёртвая зона", "гасит мелкую дрожь"),
-             ("Щипок", "сколько держать до клика"), ("Пороги лица", "глаза, рот, брови"),
+             ("Щипок", "сколько держать до клика"), ("Доступность", "вторая рука, клик задержкой"),
              ("По умолчанию", "вернуть всё как было"))
     cx = u(660)
     for i, (head, sub) in enumerate(cards):

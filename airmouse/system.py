@@ -92,6 +92,38 @@ def press_keys(text):
     _user32.SendInput(len(events), inputs, ctypes.sizeof(INPUT))
 
 
+# -- windows ------------------------------------------------------------------------------
+
+SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE = 3, 6, 9
+SHELL_CLASSES = {"Progman", "WorkerW", "Shell_TrayWnd", "Shell_SecondaryTrayWnd"}   # desktop and taskbar
+_user32.GetForegroundWindow.restype = wintypes.HWND
+_user32.GetWindowThreadProcessId.argtypes = (wintypes.HWND, ctypes.POINTER(wintypes.DWORD))
+_user32.GetClassNameW.argtypes = (wintypes.HWND, wintypes.LPWSTR, ctypes.c_int)
+_user32.IsZoomed.argtypes = (wintypes.HWND,)
+_user32.ShowWindow.argtypes = (wintypes.HWND, ctypes.c_int)
+
+
+def window_command(name):
+    """The active window: "maximize" (or restore it, if it already is) or "minimize".
+
+    AirMouse's own windows, the desktop and the taskbar are left alone. True if done.
+    """
+    hwnd = _user32.GetForegroundWindow()
+    if not hwnd:
+        return False
+    pid = wintypes.DWORD()
+    _user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+    name_buffer = ctypes.create_unicode_buffer(64)
+    _user32.GetClassNameW(hwnd, name_buffer, 64)
+    if pid.value == os.getpid() or name_buffer.value in SHELL_CLASSES:
+        return False
+    if name == "minimize":
+        _user32.ShowWindow(hwnd, SW_MINIMIZE)
+    else:
+        _user32.ShowWindow(hwnd, SW_RESTORE if _user32.IsZoomed(hwnd) else SW_MAXIMIZE)
+    return True
+
+
 def open_target(target):
     """Open a program, file, folder or web address as Explorer would. Returns an error text, or None."""
     target = os.path.expandvars(target.strip().strip('"'))
