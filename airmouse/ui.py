@@ -14,9 +14,10 @@ import cv2
 import numpy as np
 
 from . import tuning
-from .app_base import CALIBRATE_TEXT, GESTURES, METERS, MODES, BaseApp, meter_value
+from .app_base import CALIBRATE_TEXT, METERS, MODES, BaseApp, gesture_rows, meter_value, translated
 from .blit import Blitter
 from .glass import ICON_CAMERA, LiquidBackdrop, blit_text, capsule, shape
+from .i18n import _
 from .widgets import MUTED, TEXT, Button, Segmented, Slider, Stepper, Toggle, set_theme, style
 
 W, H = 1120, 840                         # logical size of the window
@@ -110,35 +111,37 @@ class App(BaseApp):
                 self._schedule_save()
             return apply
 
-        self.segmented = Segmented(x0, 120, cw, 44, MODES, st.mode, self._on_mode)
-        self.start_btn = Button(x0, 180, cw, 52, "Старт", self._toggle_start, style="accent", size=17)
+        # Switching language or design reopens the window; let the pill slide first.
+        self.language = Segmented(x0 + cw - 96, 41, 96, 34, (("ru", "RU"), ("en", "EN")), st.language,
+                                  lambda code: self.after(250, self._switch_language, code))
+        self.segmented = Segmented(x0, 120, cw, 44, translated(MODES), st.mode, self._on_mode)
+        self.start_btn = Button(x0, 180, cw, 52, _("Старт"), self._toggle_start, style="accent", size=17)
         self.control_toggle = Toggle(x0 + cw - 52, 254, True, self._set_control)
         self.camera_stepper = Stepper(x0 + cw - 104, 344, st.camera_index, 0, 4, self._on_camera)
         self.sliders = [
-            Slider(x0, 388, cw, "Стабилизация", 0.0, 1.0, st.smoothing, _pct, setter("smoothing")),
-            Slider(x0, 442, cw, "Скорость курсора", 0.0, 1.0, st.cursor_speed, _pct, setter("cursor_speed")),
+            Slider(x0, 388, cw, _("Стабилизация"), 0.0, 1.0, st.smoothing, _pct, setter("smoothing")),
+            Slider(x0, 442, cw, _("Скорость курсора"), 0.0, 1.0, st.cursor_speed, _pct, setter("cursor_speed")),
             None,  # mode dependent, see _apply_mode
-            Slider(x0, 550, cw, "Скорость прокрутки", 0.5, 6.0, st.scroll_speed, lambda v: f"{v:.1f}×",
+            Slider(x0, 550, cw, _("Скорость прокрутки"), 0.5, 6.0, st.scroll_speed, lambda v: f"{v:.1f}×",
                    setter("scroll_speed")),
         ]
-        self.pinch_slider = Slider(x0, 496, cw, "Чувствительность клика", 0.15, 0.45, st.pinch_threshold,
+        self.pinch_slider = Slider(x0, 496, cw, _("Чувствительность клика"), 0.15, 0.45, st.pinch_threshold,
                                    lambda v: _pct((v - 0.15) / 0.30), setter("pinch_threshold"))
-        self.blink_slider = Slider(x0, 496, cw, "Моргание для клика", 0.25, 0.8, st.blink_time,
-                                   lambda v: f"{v:.2f} с", setter("blink_time"))
+        self.blink_slider = Slider(x0, 496, cw, _("Моргание для клика"), 0.25, 0.8, st.blink_time,
+                                   lambda v: _("{:.2f} с").format(v), setter("blink_time"))
         self.invert_toggle = Toggle(x0 + cw - 52, 616, st.invert_scroll, setter("invert_scroll"))
         self.top_toggle = Toggle(x0 + cw - 52, 656, st.always_on_top, self._set_always_on_top)
-        # Switching design reopens the window; let the pill slide first.
         self.design = Segmented(x0 + cw - 264, 693, 264, 36,
-                                (("glass", "Стекло"), ("nature", "Природа"), ("classic", "Классика")),
+                                translated((("glass", "Стекло"), ("nature", "Природа"), ("classic", "Классика"))),
                                 st.design, lambda d: self.after(250, self._switch_design, d))
         self.calibrate_btn = Button(x0, 746, cw, 44, "", self._calibrate, size=15)
-        self.widgets_btn = Button(*WIDGETS_BUTTON, "Виджеты", self.open_widget_editor, size=15)
-        self.notebook_btn = Button(*NOTEBOOK_BUTTON, "Блокнот", self.toggle_notebook, size=15)
-        self.advanced_btn = Button(*ADVANCED_BUTTON, "Подробнее", self.open_advanced, size=15)
+        self.widgets_btn = Button(*WIDGETS_BUTTON, _("Виджеты"), self.open_widget_editor, size=15)
+        self.notebook_btn = Button(*NOTEBOOK_BUTTON, _("Блокнот"), self.toggle_notebook, size=15)
+        self.advanced_btn = Button(*ADVANCED_BUTTON, _("Подробнее"), self.open_advanced, size=15)
 
     def _widgets(self):
-        return [self.segmented, self.start_btn, self.control_toggle, self.camera_stepper, *self.sliders,
-                self.invert_toggle, self.top_toggle, self.design, self.calibrate_btn, self.widgets_btn,
+        return [self.language, self.segmented, self.start_btn, self.control_toggle, self.camera_stepper,
+                *self.sliders, self.invert_toggle, self.top_toggle, self.design, self.calibrate_btn, self.widgets_btn,
                 self.notebook_btn, self.advanced_btn]
 
     def scale(self):
@@ -149,10 +152,10 @@ class App(BaseApp):
     def _apply_mode(self):
         mode = self.settings.mode
         self.sliders[2] = self.pinch_slider if mode == "hand" else self.blink_slider
-        self.calibrate_btn.label = CALIBRATE_TEXT[mode]
+        self.calibrate_btn.label = _(CALIBRATE_TEXT[mode])
 
     def _show_running(self, running):
-        self.start_btn.label, self.start_btn.style = ("Стоп", "danger") if running else ("Старт", "accent")
+        self.start_btn.label, self.start_btn.style = (_("Стоп"), "danger") if running else (_("Старт"), "accent")
         if not running:
             self._camera_bg = None
 
@@ -182,7 +185,7 @@ class App(BaseApp):
         self._draw_status(frame)
         if self.tracker is not None and self.session.started is not None:
             self._draw_session(frame, now)
-        gestures = GESTURES[self.settings.mode]
+        gestures = gesture_rows(self.settings.mode, self.settings)
         card_h = 52 + 24 * len(gestures)
         card_y = H - 16 - card_h
         self._draw_gestures(frame, gestures, card_y, card_h)
@@ -204,19 +207,19 @@ class App(BaseApp):
         blit_text(frame, text, x * self.s, y * self.s, weight, size * self.s, color, anchor)
 
     def _draw_sidebar(self, frame):
-        x0, _, sw, _ = SIDEBAR
+        x0, _y, sw, _h = SIDEBAR
         x0 += 24
         right = SIDEBAR[0] + sw - 24
         self._text(frame, "AirMouse", x0, 58, 32, weight="bold")
-        self._text(frame, "Мышь, которой управляете вы", x0, 94, 14, MUTED)
-        self._text(frame, "Управлять мышью", x0, 262, 15)
-        self._text(frame, "Ctrl+Alt+M — пауза", x0, 283, 12, MUTED)
+        self._text(frame, _("Мышь, которой управляете вы"), x0, 94, 14, MUTED)
+        self._text(frame, _("Управлять мышью"), x0, 262, 15)
+        self._text(frame, _("Ctrl+Alt+M — пауза"), x0, 283, 12, MUTED)
         capsule(frame, x0 * self.s, 314 * self.s, (right - x0) * self.s, 1 * self.s, (255, 255, 255), alpha=0.14)
-        self._text(frame, "НАСТРОЙКИ", x0, 334, 11, MUTED, "semibold")
-        self._text(frame, "Камера", x0, 360, 14)
-        self._text(frame, "Обратная прокрутка", x0, 631, 14)
-        self._text(frame, "Поверх всех окон", x0, 671, 14)
-        self._text(frame, "Дизайн", x0, 711, 14)
+        self._text(frame, _("НАСТРОЙКИ"), x0, 334, 11, MUTED, "semibold")
+        self._text(frame, _("Камера"), x0, 360, 14)
+        self._text(frame, _("Обратная прокрутка"), x0, 631, 14)
+        self._text(frame, _("Поверх всех окон"), x0, 671, 14)
+        self._text(frame, _("Дизайн"), x0, 711, 14)
         self._text(frame, self.calibration_info(), x0, 806, 12, MUTED)
 
     def _draw_status(self, frame):
@@ -234,7 +237,7 @@ class App(BaseApp):
         x, y, w, h = SESSION
         self._panel(frame, SESSION, 26)
         duration, fps, cpu, actions = self.session.summary(self.tracker, now)
-        self._text(frame, "СЕАНС", x + 22, y + 24, 11, MUTED, "semibold")
+        self._text(frame, _("СЕАНС"), x + 22, y + 24, 11, MUTED, "semibold")
         self._text(frame, duration, x + w - 22, y + 24, 12, MUTED, anchor="rm")
         values = list(self.session.fps)
         if len(values) > 1:
@@ -251,7 +254,7 @@ class App(BaseApp):
 
     def _draw_gestures(self, frame, gestures, y, h):
         self._panel(frame, (16, y, CARD_W, h), 26)
-        self._text(frame, "ЖЕСТЫ", 40, y + 26, 11, MUTED, "semibold")
+        self._text(frame, _("ЖЕСТЫ"), 40, y + 26, 11, MUTED, "semibold")
         for i, (gesture, action) in enumerate(gestures):
             ry = y + 54 + 24 * i
             self._text(frame, gesture, 40, ry, 13, weight="semibold")
@@ -260,12 +263,12 @@ class App(BaseApp):
     def _draw_meters(self, frame, y):
         s = self.s
         self._panel(frame, (16, y, CARD_W, 92), 26)
-        self._text(frame, "ЛИЦО", 40, y + 26, 11, MUTED, "semibold")
+        self._text(frame, _("ЛИЦО"), 40, y + 26, 11, MUTED, "semibold")
         face = self.face()
         for i, (label, key) in enumerate(METERS):
             col, row = i % 2, i // 2
             lx, ly = 40 + col * 224, y + 52 + row * 24
-            self._text(frame, label, lx, ly, 13)
+            self._text(frame, _(label), lx, ly, 13)
             value = meter_value(face, key) if face is not None else 0.0
             bx = lx + 98
             capsule(frame, bx * s, (ly - 3) * s, 100 * s, 6 * s, (255, 255, 255), alpha=0.16)
@@ -278,8 +281,8 @@ class App(BaseApp):
         self._panel(frame, (cx - w / 2, cy - h / 2, w, h), 32)
         starting = self.tracker is not None
         self._text(frame, ICON_CAMERA, cx, cy - 32, 30, weight="icons", anchor="mm")
-        title = "Включаю камеру…" if starting else "Камера выключена"
-        hint = "Это займёт пару секунд" if starting else "Нажмите «Старт»"
+        title = _("Включаю камеру…") if starting else _("Камера выключена")
+        hint = _("Это займёт пару секунд") if starting else _("Нажмите «Старт»")
         self._text(frame, title, cx, cy + 14, 21, weight="semibold", anchor="mm")
         self._text(frame, hint, cx, cy + 44, 14, MUTED, anchor="mm")
 

@@ -13,11 +13,12 @@ from unittest import mock
 
 import numpy as np
 
-from airmouse import onscreen
+from airmouse import onscreen, tuning
 from airmouse.gestures import DRAG, MOVE, NO_HAND, PENDING, SCROLL
 from airmouse.onscreen import (ButtonsWidget, ClockWidget, CursorRing, MediaWidget, OnScreen, StatusWidget,
                                SystemWidget, VolumeWidget, clean_specs, default_widgets)
 from airmouse.settings import Settings
+from airmouse.twohands import PRECISE, ZOOM, Dwell
 
 
 class FakeVolume:
@@ -58,12 +59,16 @@ class Env:
         self.frame, self.frame_id = np.full((480, 640, 3), 90, np.uint8), 1
         self.requests, self.saved = [], 0
         self.mouse_at = (500, 400)
+        self.dwell = ("left", False)
 
     def status(self):
         return "Курсор", onscreen.GREEN, "30 кадр/с"
 
     def camera_on(self):
         return True
+
+    def dwell_state(self):
+        return self.dwell
 
     def cursor(self):
         return self.mouse_at
@@ -189,6 +194,22 @@ class InputTest(unittest.TestCase):
         self.assertEqual((env.volume.sets, env.volume.mute), ([], False))
         widget.render(time.perf_counter())
 
+    def test_dwell_panel_picks_the_next_click(self):
+        widget, env = make("dwell")
+        click(widget, *centre(widget, "right"))
+        click(widget, *centre(widget, "drag"))
+        self.assertEqual(env.requests, [("dwell", "right"), ("dwell", "drag")])
+        self.assertFalse(widget.wanted(Settings()))            # only with the dwell click on
+        settings = Settings()
+        tuning.set_value(settings, "dwell_click", 1)
+        self.assertTrue(widget.wanted(settings))
+        widget.render(1.0)
+        widget.dirty = False
+        env.dwell = ("drag", True)                             # a dwell drag holds the button
+        widget.tick(1.1)
+        self.assertTrue(widget.dirty)
+        widget.render(1.1)
+
     def test_status_gear_opens_the_editor(self):
         widget, env = make("status")
         click(widget, *centre(widget, "settings"))
@@ -223,7 +244,8 @@ class RingTest(unittest.TestCase):
 
     def test_render(self):
         ring = CursorRing(1.5)
-        for state in (ring.state(MOVE, 0.5, 0), ring.state(PENDING, 0, 0), ring.state(SCROLL, 0, 0)):
+        for state in (ring.state(MOVE, 0.5, 0), ring.state(PENDING, 0, 0), ring.state(SCROLL, 0, 0),
+                      ring.state(PRECISE, 0.5, 0), ring.state(ZOOM, 0, 0)):
             layer = ring.render(state)
             self.assertEqual((layer.w, layer.h), (ring.size, ring.size))
             self.assertLess(float(layer.alpha[ring.size // 2, ring.size // 2]), 0.01)   # the cursor stays visible
@@ -378,6 +400,18 @@ class ManagerTest(unittest.TestCase):
             self.screen.request(("copy_page", notebook))
             self.screen._update(1.0)
         self.assertIn("Скопировано", notebook.note[0])
+
+    def test_dwell_panel_only_with_the_dwell_click(self):
+        self.app.tracker, self.app._has_frame = tracker(), True
+        self.app.tracker.dwell = Dwell(self.app.settings)
+        self.run_timer(1.0)
+        self.assertFalse(self.windows()["dwell"].visible)
+        tuning.set_value(self.app.settings, "dwell_click", 1)
+        self.run_timer(1.1)
+        self.assertTrue(self.windows()["dwell"].visible)
+        self.screen.request(("dwell", "double"))
+        self.screen._update(1.2)
+        self.assertEqual(self.app.tracker.dwell.kind, "double")
 
     def test_arrange_keeps_widgets_on_the_screen_in_a_column(self):
         self.screen.arrange()

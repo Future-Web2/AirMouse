@@ -14,7 +14,8 @@ except ImportError:
     sv_ttk = None
 
 from . import tuning
-from .app_base import CALIBRATE_TEXT, DESIGNS, GESTURES, METERS, MODES, BaseApp, meter_value
+from .app_base import CALIBRATE_TEXT, DESIGNS, METERS, MODES, BaseApp, gesture_rows, meter_value, translated
+from .i18n import LANGUAGE_LABEL, LANGUAGES, _
 
 PREVIEW_W, PREVIEW_H = 480, 360
 PREVIEW_BG = "#1b1b1b"
@@ -71,11 +72,11 @@ class App(BaseApp):
         self.canvas_image = self.canvas.create_image(0, 0, anchor="nw", image=self.photo)
         self.canvas_text = self.canvas.create_text(
             PREVIEW_W // 2, PREVIEW_H // 2, fill="#a0a0a0", font=("Segoe UI", 12), justify="center")
-        self._show_placeholder("Камера выключена\nНажмите «Старт»")
+        self._show_placeholder(_("Камера выключена\nНажмите «Старт»"))
 
         status = ttk.Frame(left)
         status.pack(fill="x", pady=(10, 0))
-        self.mode_var = tk.StringVar(value="Остановлено")
+        self.mode_var = tk.StringVar(value=_("Остановлено"))
         ttk.Label(status, textvariable=self.mode_var, font=("Segoe UI", 13, "bold")).pack(side="left")
         self.fps_var = tk.StringVar()
         ttk.Label(status, textvariable=self.fps_var, foreground=MUTED).pack(side="right")
@@ -83,7 +84,7 @@ class App(BaseApp):
         # This run: frame rate over the last minute (a line), processor use, what was done.
         self.session_slot = ttk.Frame(left)
         self.session_slot.pack(fill="x")
-        self.session_box = ttk.LabelFrame(self.session_slot, text="Сеанс", padding=(12, 6))
+        self.session_box = ttk.LabelFrame(self.session_slot, text=_("Сеанс"), padding=(12, 6))
         self.session_chart = tk.Canvas(self.session_box, width=PREVIEW_W - 26, height=30, highlightthickness=0,
                                        bg=PREVIEW_BG)
         self.session_chart.pack(fill="x")
@@ -95,86 +96,81 @@ class App(BaseApp):
 
         self.meter_slot = ttk.Frame(left)
         self.meter_slot.pack(fill="x")
-        self.face_box = ttk.LabelFrame(self.meter_slot, text="Лицо", padding=(12, 6))
+        self.face_box = ttk.LabelFrame(self.meter_slot, text=_("Лицо"), padding=(12, 6))
         self.meters = {}
         for i, (title, key) in enumerate(METERS):
             row, col = divmod(i, 2)
-            ttk.Label(self.face_box, text=title).grid(row=row, column=col * 2, sticky="w", pady=2,
-                                                      padx=(0 if col == 0 else 16, 8))
+            ttk.Label(self.face_box, text=_(title)).grid(row=row, column=col * 2, sticky="w", pady=2,
+                                                         padx=(0 if col == 0 else 16, 8))
             bar = ttk.Progressbar(self.face_box, maximum=1.0, length=120)
             bar.grid(row=row, column=col * 2 + 1, sticky="w")
             self.meters[key] = bar
 
-        self.gestures_box = ttk.LabelFrame(left, text="Жесты", padding=(12, 6))
+        self.gestures_box = ttk.LabelFrame(left, text=_("Жесты"), padding=(12, 6))
         self.gestures_box.pack(fill="x", pady=(12, 0))
 
         # Right: mode, controls and settings
         right = ttk.Frame(main)
         right.grid(row=0, column=1, sticky="n", padx=(24, 0))
         ttk.Label(right, text="AirMouse", font=("Segoe UI Variable Display", 24, "bold")).pack(anchor="w")
-        ttk.Label(right, text="Мышь, которой управляете вы", foreground=MUTED).pack(anchor="w", pady=(0, 12))
+        ttk.Label(right, text=_("Мышь, которой управляете вы"), foreground=MUTED).pack(anchor="w", pady=(0, 12))
 
         modes = ttk.Frame(right)
         modes.pack(fill="x", pady=(0, 12))
         self.mode_choice = tk.StringVar(value=self.settings.mode)
-        for i, (key, title) in enumerate(MODES):
+        for i, (key, title) in enumerate(translated(MODES)):
             modes.columnconfigure(i, weight=1, uniform="mode")
             ttk.Radiobutton(modes, text=title, value=key, variable=self.mode_choice, style="Toggle.TButton",
                             command=lambda: self._on_mode(self.mode_choice.get())).grid(
                 row=0, column=i, sticky="ew", padx=(0 if i == 0 else 4, 0))
 
-        self.start_btn = ttk.Button(right, text="Старт", style="Accent.TButton", command=self._toggle_start)
+        self.start_btn = ttk.Button(right, text=_("Старт"), style="Accent.TButton", command=self._toggle_start)
         self.start_btn.pack(fill="x", ipady=4)
 
         self.control_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(right, text="Управлять мышью   Ctrl+Alt+M", variable=self.control_var,
+        ttk.Checkbutton(right, text=_("Управлять мышью   Ctrl+Alt+M"), variable=self.control_var,
                         style="Switch.TCheckbutton",
                         command=lambda: self._set_control(self.control_var.get())).pack(anchor="w", pady=(12, 0))
 
-        box = ttk.LabelFrame(right, text="Настройки", padding=(12, 8))
+        box = ttk.LabelFrame(right, text=_("Настройки"), padding=(12, 8))
         box.pack(fill="x", pady=(16, 0))
 
         camera_row = ttk.Frame(box)
         camera_row.pack(fill="x")
-        ttk.Label(camera_row, text="Камера").pack(side="left")
+        ttk.Label(camera_row, text=_("Камера")).pack(side="left")
         self.camera_var = tk.StringVar(value=str(self.settings.camera_index))
         camera = ttk.Combobox(camera_row, textvariable=self.camera_var, values=[str(i) for i in range(5)],
                               width=4, state="readonly")
         camera.pack(side="right")
         camera.bind("<<ComboboxSelected>>", lambda _e: self._on_camera(int(self.camera_var.get())))
 
-        self._slider(box, "Стабилизация", "smoothing", 0.0, 1.0, lambda v: f"{v * 100:.0f}%")
-        self._slider(box, "Скорость курсора", "cursor_speed", 0.0, 1.0, lambda v: f"{v * 100:.0f}%")
+        self._slider(box, _("Стабилизация"), "smoothing", 0.0, 1.0, lambda v: f"{v * 100:.0f}%")
+        self._slider(box, _("Скорость курсора"), "cursor_speed", 0.0, 1.0, lambda v: f"{v * 100:.0f}%")
         click_slot = ttk.Frame(box)
         click_slot.pack(fill="x")
-        self.pinch_row = self._slider(click_slot, "Чувствительность клика", "pinch_threshold", 0.15, 0.45,
+        self.pinch_row = self._slider(click_slot, _("Чувствительность клика"), "pinch_threshold", 0.15, 0.45,
                                       lambda v: f"{(v - 0.15) / 0.30 * 100:.0f}%")
-        self.blink_row = self._slider(click_slot, "Моргание для клика", "blink_time", 0.25, 0.8,
-                                      lambda v: f"{v:.2f} с")
-        self._slider(box, "Скорость прокрутки", "scroll_speed", 0.5, 6.0, lambda v: f"{v:.1f}×")
-        self._check(box, "Обратная прокрутка", "invert_scroll")
-        self._check(box, "Поверх всех окон", "always_on_top", self._set_always_on_top)
-        self.widgets_var = self._check(box, "Виджеты на экране (палец вверх, Ctrl+Alt+W)", "widgets_on")
-        self._check(box, "Кольцо у курсора", "cursor_ring")
+        self.blink_row = self._slider(click_slot, _("Моргание для клика"), "blink_time", 0.25, 0.8,
+                                      lambda v: _("{:.2f} с").format(v))
+        self._slider(box, _("Скорость прокрутки"), "scroll_speed", 0.5, 6.0, lambda v: f"{v:.1f}×")
+        self._check(box, _("Обратная прокрутка"), "invert_scroll")
+        self._check(box, _("Поверх всех окон"), "always_on_top", self._set_always_on_top)
+        self.widgets_var = self._check(box, _("Виджеты на экране (палец вверх, Ctrl+Alt+W)"), "widgets_on")
+        self._check(box, _("Кольцо у курсора"), "cursor_ring")
         buttons = ttk.Frame(box)
         buttons.pack(fill="x", pady=(10, 0))
         buttons.columnconfigure((0, 1, 2), weight=1, uniform="more")
-        ttk.Button(buttons, text="Виджеты…", command=self.open_widget_editor).grid(
+        ttk.Button(buttons, text=_("Виджеты…"), command=self.open_widget_editor).grid(
             row=0, column=0, sticky="ew", padx=(0, 4))
-        ttk.Button(buttons, text="Блокнот", command=self.toggle_notebook).grid(row=0, column=1, sticky="ew",
-                                                                            padx=(0, 4))
-        ttk.Button(buttons, text="Подробнее…", command=self.open_advanced).grid(row=0, column=2, sticky="ew")
+        ttk.Button(buttons, text=_("Блокнот"), command=self.toggle_notebook).grid(row=0, column=1, sticky="ew",
+                                                                               padx=(0, 4))
+        ttk.Button(buttons, text=_("Подробнее…"), command=self.open_advanced).grid(row=0, column=2, sticky="ew")
 
-        design_row = ttk.Frame(box)
-        design_row.pack(fill="x", pady=(10, 0))
-        ttk.Label(design_row, text="Дизайн").pack(side="left")
-        names = dict(DESIGNS)
-        self.design_var = tk.StringVar(value=names[self.settings.design])
-        design = ttk.Combobox(design_row, textvariable=self.design_var, values=list(names.values()), width=26,
-                              state="readonly")
-        design.pack(side="right")
-        design.bind("<<ComboboxSelected>>", lambda _e: self._switch_design(
-            next(k for k, v in DESIGNS if v == self.design_var.get())))
+        designs = translated(DESIGNS)
+        self.design_var = self._choice(box, _("Дизайн"), designs, self.settings.design, 26,
+                                       lambda key: self._switch_design(key))
+        self._choice(box, LANGUAGE_LABEL, LANGUAGES, self.settings.language, 12,
+                     lambda key: self._switch_language(key))
 
         self.calibrate_btn = ttk.Button(box, command=self._calibrate)
         self.calibrate_btn.pack(fill="x", pady=(12, 2))
@@ -200,6 +196,18 @@ class App(BaseApp):
         ttk.Scale(row, from_=lo, to=hi, variable=var, command=changed).pack(fill="x")
         return row
 
+    def _choice(self, parent, title, options, value, width, on_choose):
+        """A row with a drop-down list of ((key, name), ...); on_choose(key) when another is picked."""
+        row = ttk.Frame(parent)
+        row.pack(fill="x", pady=(10, 0))
+        ttk.Label(row, text=title).pack(side="left")
+        names = dict(options)
+        var = tk.StringVar(value=names[value])
+        box = ttk.Combobox(row, textvariable=var, values=list(names.values()), width=width, state="readonly")
+        box.pack(side="right")
+        box.bind("<<ComboboxSelected>>", lambda _e: on_choose(next(k for k, v in options if v == var.get())))
+        return var
+
     def _check(self, parent, title, attr, on_change=None):
         var = tk.BooleanVar(value=getattr(self.settings, attr))
 
@@ -223,7 +231,7 @@ class App(BaseApp):
         mode = self.settings.mode
         for child in self.gestures_box.winfo_children():
             child.destroy()
-        for row, (gesture, action) in enumerate(GESTURES[mode]):
+        for row, (gesture, action) in enumerate(gesture_rows(mode, self.settings)):
             ttk.Label(self.gestures_box, text=gesture, font=("Segoe UI", 10, "bold")).grid(
                 row=row, column=0, sticky="w", pady=1)
             ttk.Label(self.gestures_box, text=action).grid(row=row, column=1, sticky="w", padx=(14, 0), pady=1)
@@ -235,15 +243,15 @@ class App(BaseApp):
             self.face_box.pack_forget()
             self.blink_row.pack_forget()
             self.pinch_row.pack(fill="x")
-        self.calibrate_btn.configure(text=CALIBRATE_TEXT[mode])
+        self.calibrate_btn.configure(text=_(CALIBRATE_TEXT[mode]))
         self.calib_info.set(self.calibration_info())
 
     def _show_running(self, running):
-        self.start_btn.configure(text="Стоп" if running else "Старт",
+        self.start_btn.configure(text=_("Стоп") if running else _("Старт"),
                                  style="TButton" if running else "Accent.TButton")
-        self._show_placeholder("Включаю камеру…" if running else "Камера выключена\nНажмите «Старт»")
+        self._show_placeholder(_("Включаю камеру…") if running else _("Камера выключена\nНажмите «Старт»"))
         if not running:
-            self.mode_var.set("Остановлено")
+            self.mode_var.set(_("Остановлено"))
             self.fps_var.set("")
             for bar in self.meters.values():
                 bar.configure(value=0)

@@ -2,11 +2,12 @@
 
 import unittest
 
-from airmouse import bench, tuning
+from airmouse import bench, i18n, tuning
+from airmouse.app_base import gesture_rows
 from airmouse.bench import LEFT_REST, RIGHT_REST, TwoHandSim, cam_for, hand
 from airmouse.gestures import HandFeatures
 from airmouse.settings import Settings
-from airmouse.twohands import HandControl
+from airmouse.twohands import PRECISE, SWIPES, ZOOM, Dwell, HandControl
 
 
 def tuned(**values):
@@ -188,6 +189,159 @@ class DwellTest(unittest.TestCase):
         self.assertEqual(sim.actions(), [])                    # 2 s are not enough
         sim.rest(45, RIGHT)
         self.assertEqual(sim.actions(), [("click", "left")])
+
+    def test_kinds_picked_on_the_panel(self):
+        self.assertEqual(bench.dwell_kinds(), {"as_picked": True, "kind_after": "left"})
+
+    def test_own_panel_always_gets_a_plain_click(self):
+        dwell = Dwell(tuned(dwell_click=1, dwell_ms=500))
+        dwell.choose("right")
+        self.assertEqual(dwell.update((100, 100), 0.0, True, own=True), [])
+        self.assertEqual(dwell.update((100, 100), 0.6, True, own=True), [("click", "left")])
+        self.assertEqual(dwell.kind, "right")                  # still picked for the next dwell elsewhere
+        dwell.choose("nonsense")
+        self.assertEqual(dwell.kind, "right")
+
+    def test_a_dwell_drag_is_let_go_on_pause_and_when_switched_off(self):
+        settings = tuned(dwell_click=1, dwell_ms=500)
+        dwell = Dwell(settings)
+        dwell.choose("drag")
+        dwell.update((100, 100), 0.0, True)
+        self.assertEqual(dwell.update((100, 100), 0.6, True), [("down", "left")])
+        self.assertEqual(dwell.release_all(), [("up", "left")])
+        dwell.choose("drag")
+        dwell.update((300, 100), 1.0, True)
+        self.assertEqual(dwell.update((300, 100), 1.6, True), [("down", "left")])
+        tuning.set_value(settings, "dwell_click", 0)
+        self.assertEqual(dwell.update((300, 100), 1.7, True), [("up", "left")])
+
+
+class PreciseCursorTest(unittest.TestCase):
+    def test_the_l_is_neither_a_pinch_nor_a_pose_of_its_own(self):
+        f = HandFeatures(hand(200, 200, pose="l"))
+        self.assertTrue(f.l_shape)
+        self.assertFalse(f.open or f.two_fingers or f.thumb_up or f.thumb_down)
+        self.assertGreater(min(f.pinch_index, f.pinch_middle), 0.6)
+        self.assertTrue(HandFeatures(hand(200, 200, pose="l", left=True)).l_shape)
+        for pose in ("open", "two", "thumb", "thumb_down", "right"):
+            self.assertFalse(HandFeatures(hand(200, 200, pose=pose)).l_shape, pose)
+
+    def test_slower_cursor_and_no_jump_after(self):
+        result = bench.precise_cursor()
+        self.assertAlmostEqual(result["share_of_movement"], 0.3, delta=0.05)
+        self.assertLessEqual(result["jump_after_px"], 3.0)
+        self.assertLessEqual(result["click_from_aim_px"], 3.0)
+
+    def test_shown_as_its_own_mode(self):
+        sim = TwoHandSim(20)
+        sim.rest(20, RIGHT, LEFT)
+        self.assertEqual(sim.control.mode, "move")
+        sim.rest(10, RIGHT, dict(LEFT, pose="l"))
+        self.assertEqual(sim.control.mode, PRECISE)
+        sim.rest(10, RIGHT, LEFT)
+        self.assertEqual(sim.control.mode, "move")
+        self.assertEqual(sim.actions(), [])
+
+    def test_off_at_speed_one(self):
+        sim = TwoHandSim(21, settings=tuned(precise_speed=1.0))
+        sim.rest(20, RIGHT, dict(LEFT, pose="l"))
+        self.assertEqual(sim.control.mode, "move")
+
+    def test_pointing_past_the_edge_still_reaches_it(self):
+        sim = TwoHandSim(22)
+        sim.rest(20, RIGHT, dict(LEFT, pose="l"))
+        for i in range(1, 31):                                 # precise: the cursor stays well left of the hand
+            sim.step(dict(RIGHT, ox=RIGHT_REST[0] + 3 * i), dict(LEFT, pose="l"))
+        sim.rest(10, dict(RIGHT, ox=RIGHT_REST[0] + 90), LEFT)
+        right_edge = cam_for(1919, 540)[0]
+        for i in range(1, 21):                                 # now the hand goes right, to the edge and on
+            sim.step(dict(RIGHT, ox=RIGHT_REST[0] + 90 + (right_edge + 60 - RIGHT_REST[0] - 90) * i / 20), LEFT)
+        sim.rest(20, dict(RIGHT, ox=right_edge + 60), LEFT)
+        self.assertGreaterEqual(sim.cursor[0], 1915)
+
+
+class ZoomTest(unittest.TestCase):
+    def test_both_v_apart_and_together(self):
+        self.assertEqual(bench.zoom_gesture(), {"zoom_in_steps": 3, "zoom_out_steps": -3, "other_actions": 0})
+
+    def test_magnifier_and_off(self):
+        sim = TwoHandSim(23, settings=tuned(zoom_mode=2))
+        right, left = dict(RIGHT, ox=300, pose="two"), dict(LEFT, ox=200, pose="two")
+        sim.rest(20, right, left)
+        for i in range(1, 16):
+            sim.step(dict(right, ox=300 + 4 * i), dict(left, ox=200 - 4 * i))
+        self.assertEqual(sim.actions(), [("keys", "win+plus")] * 2)
+        sim = TwoHandSim(23, settings=tuned(zoom_mode=0))
+        sim.rest(20, right, left)
+        for i in range(1, 16):
+            sim.step(dict(right, ox=300 + 4 * i), dict(left, ox=200 - 4 * i))
+        self.assertNotIn("zoom", [a[0] for a in sim.actions()])
+        self.assertNotEqual(sim.control.mode, ZOOM)
+
+
+class SwipeTest(unittest.TestCase):
+    def test_slides_and_no_false_swipes(self):
+        self.assertEqual(bench.swipes(), {"next": True, "previous": True, "both_apart_is_all_windows": True,
+                                          "coming_into_view": 0})
+
+    def test_nothing_until_a_command_is_picked(self):
+        sim = TwoHandSim(24)
+        sim.rest(30, RIGHT, dict(LEFT, ox=230))
+        for i in range(1, 7):
+            sim.step(RIGHT, dict(LEFT, ox=230 - 30 * i))
+        sim.rest(20, RIGHT, dict(LEFT, ox=50))
+        self.assertEqual(sim.actions(), [])
+
+    def test_commands(self):
+        for value, (to_left, to_right) in SWIPES.items():
+            sim = TwoHandSim(25, settings=tuned(swipe_action=value))
+            sim.rest(30, RIGHT, dict(LEFT, ox=230))
+            for i in range(1, 7):
+                sim.step(RIGHT, dict(LEFT, ox=230 - 30 * i))
+            sim.rest(30, RIGHT, dict(LEFT, ox=50))
+            for i in range(1, 7):
+                sim.step(RIGHT, dict(LEFT, ox=50 + 30 * i))
+            sim.rest(10, RIGHT, dict(LEFT, ox=230))
+            self.assertEqual(sim.actions(), [("keys", to_left), ("keys", to_right)], value)
+
+
+class OneHandPauseTest(unittest.TestCase):
+    def test_thumb_down_pauses_and_resumes(self):
+        result = bench.one_hand_pause()
+        self.assertEqual((result["pauses"], result["actions_while_paused"], result["enabled_after"]), (2, 0, True))
+        self.assertLess(result["seconds_to_pause"], 1.2)
+
+    def test_both_thumbs_down_do_nothing(self):
+        sim = TwoHandSim(26)
+        sim.rest(20, RIGHT, LEFT)
+        sim.rest(45, dict(RIGHT, pose="thumb_down"), dict(LEFT, pose="thumb_down"))
+        sim.rest(10, RIGHT, LEFT)
+        self.assertEqual(sim.actions(), [])
+
+    def test_can_be_switched_off(self):
+        sim = TwoHandSim(27, settings=tuned(thumb_pause=0))
+        sim.rest(20, RIGHT)
+        sim.rest(45, dict(RIGHT, pose="thumb_down"))
+        self.assertEqual(sim.actions(), [])
+        self.assertTrue(sim.enabled)
+
+
+class GestureCardTest(unittest.TestCase):
+    def tearDown(self):
+        i18n.set_language("ru")
+
+    def test_lists_what_is_switched_on(self):
+        rows = dict(gesture_rows("hand", Settings()))
+        self.assertIn("Вторая рука: «L»", rows)
+        self.assertIn("Обе руки «V»: развести", rows)
+        self.assertNotIn("Вторая рука: взмах ← / →", rows)            # off until a command is picked
+        rows = dict(gesture_rows("hand", tuned(swipe_action=2, two_hands=0, thumb_pause=0)))
+        self.assertNotIn("Вторая рука: щипок", rows)
+        self.assertNotIn("Большой палец вниз, 1 с", rows)
+        self.assertEqual(len(gesture_rows("head", Settings())), 5)
+        i18n.set_language("en")
+        rows = dict(gesture_rows("hand", tuned(swipe_action=2)))
+        self.assertEqual(rows["Second hand: swipe ← / →"], "slides → / ←")
 
 
 if __name__ == "__main__":

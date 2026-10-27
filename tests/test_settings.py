@@ -45,6 +45,14 @@ class SettingsTest(unittest.TestCase):
         self.assertEqual(s.scroll_speed, 3.0)
         self.assertIsInstance(s.scroll_speed, float)
 
+    def test_language(self):
+        self.assertEqual(Settings.load().language, "")          # a new user: chosen at the first start
+        settings.SETTINGS_DIR.mkdir(parents=True)
+        settings.SETTINGS_FILE.write_text(json.dumps({"design": "classic"}), encoding="utf-8")
+        self.assertEqual(Settings.load().language, "ru")        # settings from before the choice: as it was
+        Settings(language="en").save()
+        self.assertEqual(Settings.load().language, "en")
+
 
 if __name__ == "__main__":
     unittest.main()

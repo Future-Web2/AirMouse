@@ -2,6 +2,7 @@
 
 import time
 import unittest
+from unittest import mock
 
 from airmouse import system
 from airmouse.system import KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP
@@ -37,6 +38,26 @@ class KeysTest(unittest.TestCase):
         self.assertIsNotNone(system.run_action({"do": "keys", "value": "ctrl+nothing"}))
         self.assertIsNotNone(system.run_action({"do": "nothing"}))
         self.assertIsNotNone(system.open_target(""))
+
+    def test_zoom_is_ctrl_held_around_the_wheel(self):
+        sent = []
+
+        def send_input(count, inputs, size):
+            sent.extend((inputs[i].type, inputs[i].u.ki.wVk, inputs[i].u.ki.dwFlags, inputs[i].u.mi.mouseData,
+                         inputs[i].u.mi.dwFlags) for i in range(count))
+            return count
+        with mock.patch.object(system._user32, "SendInput", send_input):   # nothing is really pressed
+            system.ctrl_wheel(-2)
+        (t0, vk0, up0, _d0, _f0), (t1, _vk1, _u1, data, wheel), (t2, vk2, up2, _d2, _f2) = sent
+        self.assertEqual((t0, vk0, up0), (system.INPUT_KEYBOARD, 0x11, 0))
+        self.assertEqual((t1, wheel, data), (system.INPUT_MOUSE, system.MOUSEEVENTF_WHEEL, (-240) & 0xFFFFFFFF))
+        self.assertEqual((t2, vk2, up2), (system.INPUT_KEYBOARD, 0x11, KEYEVENTF_KEYUP))
+
+
+class WindowTest(unittest.TestCase):
+    def test_own_window_at(self):
+        self.assertFalse(system.own_window_at(None))
+        self.assertFalse(system.own_window_at((-100000, -100000)))     # no window at all there
 
 
 class VolumeTest(unittest.TestCase):

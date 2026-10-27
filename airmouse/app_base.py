@@ -12,13 +12,15 @@ from tkinter import messagebox
 
 import cv2
 
-from . import resource_path, system, tuning, winmouse
+from . import i18n, resource_path, system, tuning, winmouse
 from .calibration import GazeCalibration
 from .face import EYES_CLOSED, NO_FACE
 from .gestures import DRAG, MOVE, NO_HAND, PENDING, PRESSED, RIGHT, SCROLL
+from .i18n import _
 from .onscreen import OnScreen
 from .settings import Settings
 from .tracker import Tracker, preload
+from .twohands import PRECISE, ZOOM
 
 DESIGNS = (("glass", "Liquid Glass"), ("nature", "Природа (запотевшее стекло)"), ("classic", "Классический"))
 MODES = (("hand", "Рука"), ("gaze", "Глаза"), ("head", "Голова"))
@@ -33,12 +35,15 @@ MODE_TEXT = {
     DRAG: "Перетаскивание",
     RIGHT: "Правый клик",
     SCROLL: "Прокрутка",
+    PRECISE: "Точный курсор",
+    ZOOM: "Масштаб",
 }
 GREY = (150, 155, 168)
 YELLOW = (255, 204, 64)
 MODE_DOT = {
     NO_HAND: GREY, NO_FACE: GREY, MOVE: (94, 224, 122), PENDING: YELLOW, PRESSED: YELLOW,
     EYES_CLOSED: YELLOW, DRAG: (255, 128, 84), RIGHT: (200, 128, 255), SCROLL: (84, 180, 255),
+    PRECISE: (90, 220, 230), ZOOM: (120, 230, 200),
 }
 
 FACE_CLICKS = (
@@ -55,8 +60,6 @@ GESTURES = {
         ("Большой + два пальца", "правый клик"),
         ("Два пальца вверх / вниз", "прокрутка"),
         ("Большой палец вверх", "показать / скрыть виджеты"),
-        ("Вторая рука: щипок", "клик; держать — перетащить"),
-        ("Развести / свести руки", "все окна / свернуть все"),
     ),
     "gaze": (
         ("Взгляд", "переносит курсор, куда смотрите"),
@@ -64,6 +67,34 @@ GESTURES = {
     ) + FACE_CLICKS,
     "head": (("Поворот головы", "двигает курсор"),) + FACE_CLICKS,
 }
+SWIPE_TEXT = {1: "вперёд / назад", 2: "слайды → / ←", 3: "рабочие столы", 4: "трек вперёд / назад"}
+ZOOM_TEXT = {1: "масштаб крупнее / мельче", 2: "экранная лупа + / −"}
+
+
+def gesture_rows(mode, settings):
+    """The «Жесты» card: (gesture, what it does) for this mode, only the gestures that are switched on."""
+    return [(_(gesture), _(action)) for gesture, action in _gesture_rows(mode, settings)]
+
+
+def _gesture_rows(mode, settings):
+    rows = list(GESTURES[mode])
+    if mode != "hand":
+        return rows
+    if tuning.get(settings, "thumb_pause"):
+        rows.append(("Большой палец вниз, 1 с", "пауза / продолжить"))
+    if tuning.get(settings, "two_hands"):
+        rows.append(("Вторая рука: щипок", "клик; держать — перетащить"))
+        if tuning.get(settings, "precise_speed") < 1.0:
+            rows.append(("Вторая рука: «L»", "точный медленный курсор"))
+        swipe = SWIPE_TEXT.get(int(tuning.get(settings, "swipe_action")))
+        if swipe:
+            rows.append(("Вторая рука: взмах ← / →", swipe))
+        zoom = ZOOM_TEXT.get(int(tuning.get(settings, "zoom_mode")))
+        if zoom:
+            rows.append(("Обе руки «V»: развести", zoom))
+        if tuning.get(settings, "hand_combos"):
+            rows.append(("Развести / свести ладони", "все окна / свернуть все"))
+    return rows
 METERS = (("Левый глаз", 0), ("Правый глаз", 1), ("Рот", "jaw"), ("Брови", "brow"))
 
 CALIBRATE_TEXT = {
@@ -81,6 +112,11 @@ PRELOAD_DELAY = 1500  # ms after the window appears: load MediaPipe in the backg
 
 def meter_value(face, key):
     return face.blink[key] if isinstance(key, int) else getattr(face, key)
+
+
+def translated(options):
+    """((key, Russian label), ...) with the labels in the language of the interface."""
+    return tuple((key, _(label)) for key, label in options)
 
 
 class Session:
@@ -112,8 +148,9 @@ class Session:
         """(duration "мм:сс", "кадр/с", processor text, actions text) for a running tracker."""
         seconds = max(int(now - self.started), 0) if self.started is not None else 0
         stats = tracker.stats
-        return (f"{seconds // 60:02d}:{seconds % 60:02d}", f"{tracker.fps:.0f} кадр/с", f"процессор {self.cpu:.0f}%",
-                f"клики {stats['left']}  ·  правые {stats['right']}  ·  прокрутка {stats['wheel']}")
+        return (f"{seconds // 60:02d}:{seconds % 60:02d}", _("{:.0f} кадр/с").format(tracker.fps),
+                _("процессор {:.0f}%").format(self.cpu),
+                _("клики {}  ·  правые {}  ·  прокрутка {}").format(stats["left"], stats["right"], stats["wheel"]))
 
 
 class BaseApp:
@@ -125,9 +162,13 @@ class BaseApp:
         self.settings = Settings.load()
         if self.settings.mode not in CALIBRATE_TEXT:
             self.settings.mode = "hand"
+        if self.settings.language not in dict(i18n.LANGUAGES):
+            self.settings.language = i18n.system_language()
+        i18n.set_language(self.settings.language)
         self.tracker = None
         self.control = True
-        self.next_design = None    # set when the user switches design; main() then opens that window
+        # Set when the user switches design or language; main() then opens the window again, in that design.
+        self.next_design = None
         self.was_running = False
         self._autostart = autostart
         self._has_frame = False
@@ -258,13 +299,24 @@ class BaseApp:
         if design == self.settings.design:
             return
         self.settings.design = design
-        self.next_design = design
+        self._reopen()
+
+    def _switch_language(self, language):
+        """Every text is made in the window's language, so the window opens again in the new one."""
+        if language == self.settings.language:
+            return
+        self.settings.language = language
+        i18n.set_language(language)
+        self._reopen()
+
+    def _reopen(self):
+        self.next_design = self.settings.design
         self.was_running = self.tracker is not None
         self._on_close()
 
     def _calibrate(self):
         if self.tracker is None:
-            messagebox.showinfo("AirMouse", "Сначала нажмите «Старт».", parent=self.root)
+            messagebox.showinfo("AirMouse", _("Сначала нажмите «Старт»."), parent=self.root)
             return
         if self.settings.mode == "gaze":
             self._open_gaze_calibration()
@@ -275,20 +327,20 @@ class BaseApp:
     def _calibrate_step(self):
         mode = self.settings.mode
         if self.tracker is None or mode == "gaze":
-            self._set_calibrate_button(CALIBRATE_TEXT[mode], True)
+            self._set_calibrate_button(_(CALIBRATE_TEXT[mode]), True)
             return
         if self._calibrate_left > 0:
-            self._set_calibrate_button(COUNTDOWN_TEXT[mode].format(self._calibrate_left), False)
+            self._set_calibrate_button(_(COUNTDOWN_TEXT[mode]).format(self._calibrate_left), False)
             self._calibrate_left -= 1
             self.after(1000, self._calibrate_step)
             return
-        self._set_calibrate_button(CALIBRATE_TEXT[mode], True)
+        self._set_calibrate_button(_(CALIBRATE_TEXT[mode]), True)
         if mode == "head":
             self.tracker.recenter()
             return
         palm = self.tracker.palm
         if palm is None:
-            messagebox.showinfo("AirMouse", "Рука не видна. Поднимите руку перед камерой и попробуйте ещё раз.",
+            messagebox.showinfo("AirMouse", _("Рука не видна. Поднимите руку перед камерой и попробуйте ещё раз."),
                                 parent=self.root)
             return
         self.settings.zone_center_x = min(max(palm[0], 0.2), 0.8)
@@ -315,8 +367,8 @@ class BaseApp:
         if self.settings.mode != "gaze":
             return ""
         if self.settings.gaze_model:
-            return f"Точность взгляда ≈ {self.settings.gaze_model['error']:.0f} px"
-        return "Калибровки ещё нет"
+            return _("Точность взгляда ≈ {:.0f} px").format(self.settings.gaze_model["error"])
+        return _("Калибровки ещё нет")
 
     # -- polling (call every frame from the design's timer) ----------------
 
@@ -364,17 +416,17 @@ class BaseApp:
         """(text, dot colour, fps text) for the status line."""
         tracker = self.tracker
         if tracker is None:
-            return "Остановлено", GREY, ""
-        fps = f"{tracker.fps:.0f} кадр/с" if self._has_frame else ""
+            return _("Остановлено"), GREY, ""
+        fps = _("{:.0f} кадр/с").format(tracker.fps) if self._has_frame else ""
         if self._calibration is not None:
-            return "Калибровка…", YELLOW, fps
+            return _("Калибровка…"), YELLOW, fps
         if not self._has_frame:
-            return "Запуск…", GREY, fps
+            return _("Запуск…"), GREY, fps
         if tracker.kind == "gaze" and not self.settings.gaze_model:
-            return "Нужна калибровка взгляда", YELLOW, fps
+            return _("Нужна калибровка взгляда"), YELLOW, fps
         if not tracker.control_enabled:
-            return "Пауза", GREY, fps
-        return MODE_TEXT.get(tracker.mode, ""), MODE_DOT.get(tracker.mode, GREY), fps
+            return _("Пауза"), GREY, fps
+        return _(MODE_TEXT.get(tracker.mode, "")), MODE_DOT.get(tracker.mode, GREY), fps
 
     def face(self):
         """Newest FaceFrame (face modes), or None."""

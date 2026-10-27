@@ -43,7 +43,10 @@ def main():
         return bench.run(args[0] if args else None)
 
     if not _first_instance():
-        ctypes.windll.user32.MessageBoxW(None, "AirMouse уже запущен.", "AirMouse", 0x40)
+        from airmouse import i18n
+        from airmouse.settings import Settings
+        i18n.set_language(Settings.load().language or i18n.system_language())
+        ctypes.windll.user32.MessageBoxW(None, i18n._("AirMouse уже запущен."), "AirMouse", 0x40)
         return 0
 
     from airmouse import winmouse

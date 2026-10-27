@@ -40,6 +40,8 @@ SCROLL = "scroll"
 
 EXTENDED_RATIO = 1.15       # straight finger: tip this much farther from the wrist than the middle joint
 THUMB_ABOVE = 0.35          # thumbs up: thumb tip this far (in palm lengths) above the rest of the hand
+L_THUMB = 0.5               # «L»: thumb tip at least this far (in palm lengths) from the index knuckle
+FINE_BLEED = 400            # screen px at 1920 px width (see GestureEngine._fine)
 
 # Seconds. Confirmations are times, not frame counts, so 60 frames per second
 # behaves like 30 (only sooner). Most other numbers are in tuning.py («Подробнее»).
@@ -105,6 +107,10 @@ class HandFeatures:
             pts[THUMB_TIP][1] < min(p[1] for p in pts[INDEX_MCP:]) - THUMB_ABOVE * size)
         self.thumb_down = not any(straight) and (
             pts[THUMB_TIP][1] > max(p[1] for p in pts[INDEX_MCP:]) + THUMB_ABOVE * size)
+        # «L»: the index finger up and the thumb out to the side, the other fingers folded. The thumb
+        # stays far from every fingertip, so this pose can never be read as a pinch.
+        self.l_shape = straight == [True, False, False, False] and (
+            _dist(pts[THUMB_TIP], pts[INDEX_MCP]) / size > L_THUMB)
         self.palm = palm_center(pts)
 
 
@@ -114,6 +120,7 @@ class GestureEngine:
     Actions: ("move", x, y), ("down", button), ("up", button),
     ("click", button), ("wheel", delta), and ("widgets",) for a held thumbs up.
     `pinch` tells how close the fingers are to a click: 0 apart .. 1 touching.
+    `fine` below 1 is the precise cursor: the cursor moves only that part of the hand's movement.
     """
 
     def __init__(self, settings, screen_w, screen_h):
@@ -122,6 +129,7 @@ class GestureEngine:
         self._px = screen_w / 1920.0
         self._filter = OneEuroFilter2D()
         self._ptr = Pointer(screen_w, screen_h)
+        self.fine = 1.0
         self._reset()
 
     def _reset(self):
@@ -142,6 +150,8 @@ class GestureEngine:
         self._scroll_ref = 0.0
         self._wheel = 0.0
         self._lost_since = None
+        self._fine_offset = (0.0, 0.0)     # where the precise cursor left the cursor, from where the hand points
+        self._last_hand = None
 
     def release_all(self):
         """Let go of any held button and forget the hand (hand lost, pause, stop)."""
@@ -322,11 +332,32 @@ class GestureEngine:
         y = (palm[1] / frame_h - y0) / (y1 - y0) * (self.screen_h - 1)
         # Let the target go a little past the edges so the leashed cursor can reach them.
         margin = 2 * leash_px(s, self._px)
-        x = min(max(x, -margin), self.screen_w - 1 + margin)
-        y = min(max(y, -margin), self.screen_h - 1 + margin)
-        self._raw.append((x, y))
+        cx = min(max(x, -margin), self.screen_w - 1 + margin)
+        cy = min(max(y, -margin), self.screen_h - 1 + margin)
+        beyond = (x - cx, y - cy)            # how far past an edge the hand points
+        self._raw.append((cx, cy))
         if tuning.get(s, "outlier_filter"):
-            x = statistics.median(p[0] for p in self._raw)
-            y = statistics.median(p[1] for p in self._raw)
+            cx = statistics.median(p[0] for p in self._raw)
+            cy = statistics.median(p[1] for p in self._raw)
         tune_filter(self._filter, s, self._px)
-        return self._filter(x, y, t)
+        return self._fine(self._filter(cx, cy, t), beyond)
+
+    def _fine(self, hand, beyond):
+        """The precise cursor. While `fine` < 1 the cursor follows only that part of the hand's movement.
+        Afterwards the cursor does not jump back to where the hand points: the difference fades as the
+        hand moves on (over FINE_BLEED px of movement), so a click right after lands where it was aimed.
+        Pointing past an edge of the screen takes the cursor to that edge, whatever is left of it."""
+        last, self._last_hand = self._last_hand, hand
+        offset = list(self._fine_offset)
+        if last is not None:
+            if self.fine < 1.0:
+                offset[0] -= (1.0 - self.fine) * (hand[0] - last[0])
+                offset[1] -= (1.0 - self.fine) * (hand[1] - last[1])
+            elif offset != [0.0, 0.0]:
+                k = math.exp(-math.dist(hand, last) / (FINE_BLEED * self._px))
+                offset = [v * k if abs(v) > 0.5 else 0.0 for v in offset]
+        for i in (0, 1):
+            if beyond[i] * offset[i] < 0:       # pointing past the edge the offset keeps the cursor from
+                offset[i] = math.copysign(max(abs(offset[i]) - abs(beyond[i]), 0.0), offset[i])
+        self._fine_offset = tuple(offset)
+        return hand[0] + offset[0], hand[1] + offset[1]

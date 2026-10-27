@@ -15,7 +15,8 @@ import numpy as np
 from . import resource_path, system, tuning, winmouse
 from .face import EYES, EYES_CLOSED, NO_FACE, NOSE_TIP, FaceEngine, read_face
 from .gestures import DRAG, MOVE, NO_HAND, PENDING, PRESSED, RIGHT, SCROLL, palm_center, zone_rect
-from .twohands import Dwell, HandControl
+from .i18n import _
+from .twohands import PRECISE, ZOOM, Dwell, HandControl
 
 HAND_MODEL = "models/hand_landmarker.task"
 FACE_MODEL = "models/face_landmarker.task"
@@ -40,6 +41,8 @@ MODE_COLORS = {
     DRAG: (60, 90, 255),
     RIGHT: (220, 110, 230),
     SCROLL: (255, 170, 50),
+    PRECISE: (230, 220, 90),
+    ZOOM: (200, 230, 120),
 }
 PAUSED_COLOR = (150, 150, 150)
 BUTTON_HAND_COLOR = (240, 190, 90)    # the second hand, the one with the buttons
@@ -134,8 +137,8 @@ def _open_camera(index, width=FRAME_W, fps=30):
         cap = cv2.VideoCapture(index)
     if not cap.isOpened():
         cap.release()
-        raise RuntimeError(f"Не удалось открыть камеру №{index}.\n"
-                           "Проверьте, что она подключена и не занята другой программой.")
+        raise RuntimeError(_("Не удалось открыть камеру №{}.\n"
+                             "Проверьте, что она подключена и не занята другой программой.").format(index))
     w, h = CAMERA_SIZES.get(int(width), (FRAME_W, FRAME_H))
     if fps > 30 or w > FRAME_W:
         # Most webcams give 60 frames per second or HD only as MJPG; the default format tops out lower.
@@ -153,7 +156,8 @@ class Tracker:
     The UI reads `mode`, `fps`, `palm`, `face`, `error` and `take_preview()`;
     it sets `control_enabled` to pause or resume mouse control. For the
     on-screen widgets: `progress`, `stats`, `events` and `widget_toggles`. Hand gestures can pause and
-    resume control themselves: `pause_toggles` counts them.
+    resume control themselves: `pause_toggles` counts them. `dwell` is the dwell click of this run
+    (the panel «Клик задержкой» picks its next kind), once the camera works.
     """
 
     def __init__(self, settings):
@@ -169,7 +173,8 @@ class Tracker:
         self.stats = Counter()            # done this run: "left" and "right" clicks, "wheel" steps
         self.events = deque(maxlen=32)    # (number, time, action) of clicks, presses and scroll steps
         self.widget_toggles = 0           # thumbs-up gestures so far
-        self.pause_toggles = 0            # pause / resume gestures so far (both thumbs up)
+        self.pause_toggles = 0            # pause / resume gestures so far (both thumbs up, a thumb down)
+        self.dwell = None
         self._event_number = 0
         self._preview = None
         self._recenter = False
@@ -210,9 +215,10 @@ class Tracker:
             sw, sh = winmouse.screen_size()
             if self.kind == "hand":
                 control = HandControl(self.settings, sw, sh)
+                self.dwell = control.dwell
             else:
                 engine = FaceEngine(self.settings, sw, sh, use_gaze=self.kind == "gaze")
-                dwell = Dwell(self.settings, sw)
+                dwell = self.dwell = Dwell(self.settings, sw)
             t0 = last_t = time.perf_counter()
             last_ms = -1
             failures = 0
@@ -221,7 +227,7 @@ class Tracker:
                 if not ok:
                     failures += 1
                     if failures > 50:
-                        raise RuntimeError("Камера перестала отдавать изображение.")
+                        raise RuntimeError(_("Камера перестала отдавать изображение."))
                     time.sleep(0.02)
                     continue
                 failures = 0
@@ -236,9 +242,12 @@ class Tracker:
                 result = landmarker.detect_for_video(mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb), ms)
 
                 second = None
+                here = winmouse.cursor_pos()
+                # Over AirMouse's own panels a dwell is always a plain click (see Dwell.update).
+                own = bool(tuning.get(s, "dwell_click")) and system.own_window_at(here)
                 if self.kind == "hand":
                     hands = [[(p.x * w, p.y * h, p.z * w) for p in marks] for marks in result.hand_landmarks]
-                    actions = control.update(hands, w, h, t, winmouse.cursor_pos(), self.control_enabled)
+                    actions = control.update(hands, w, h, t, here, self.control_enabled, own)
                     pts, second = control.pointer, control.second
                     self.palm = (palm_center(pts)[0] / w, palm_center(pts)[1] / h) if pts else None
                     self._perform(actions, mouse, t)
@@ -254,7 +263,6 @@ class Tracker:
                         self._recenter = False
                         engine.recenter()
                     if self.control_enabled:
-                        here = winmouse.cursor_pos()
                         actions = engine.update(face, t, here)
                         for action in actions:
                             if action[0] == "move":
@@ -262,10 +270,9 @@ class Tracker:
                         if any(a[0] in ("click", "down", "up", "wheel") for a in actions):
                             dwell.disarm(here)
                         else:
-                            actions += dwell.update(here, t, face is not None and engine.mode == MOVE)
+                            actions += dwell.update(here, t, face is not None and engine.mode == MOVE, own)
                     else:
-                        actions = engine.release_all()
-                        dwell.reset()
+                        actions = engine.release_all() + dwell.release_all()
                     self._perform(actions, mouse, t)
                     self.mode = engine.mode
                     self.progress = max(engine.progress, dwell.progress)
@@ -296,6 +303,8 @@ class Tracker:
                 system.press_keys(action[1])
             elif kind == "window":
                 system.window_command(action[1])
+            elif kind == "zoom":
+                system.ctrl_wheel(action[1])
             else:
                 mouse.do(action)
                 self._note(action, t)

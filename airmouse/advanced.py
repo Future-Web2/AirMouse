@@ -9,6 +9,7 @@ except ImportError:
     sv_ttk = None
 
 from . import tuning
+from .i18n import _
 
 MUTED = "#8a8a8a"
 ACCENT_BUTTON = "Accent.TButton" if sv_ttk is not None else "TButton"
@@ -16,12 +17,12 @@ ACCENT_BUTTON = "Accent.TButton" if sv_ttk is not None else "TButton"
 
 def format_value(param, value):
     if param.choices:
-        return dict(param.choices).get(value, str(value))
+        return _(dict(param.choices).get(value, str(value)))
     if param.unit == "×":
         return f"{value:.2f}×"
     if param.step >= 1:
-        return f"{value:.0f} {param.unit}".strip()
-    return f"{value:.2f} {param.unit}".strip()
+        return f"{value:.0f} {_(param.unit)}".strip()
+    return f"{value:.2f} {_(param.unit)}".strip()
 
 
 def snap(param, value):
@@ -37,12 +38,12 @@ class AdvancedSettings:
         if sv_ttk is not None and not ttk.Style(root).theme_use().startswith("sun-valley"):
             sv_ttk.set_theme("dark")
         self.win = win = tk.Toplevel(root)
-        win.title("Подробные настройки — AirMouse")
+        win.title(_("Подробные настройки — AirMouse"))
         win.resizable(False, False)
         win.protocol("WM_DELETE_WINDOW", self.close)
         outer = ttk.Frame(win, padding=16)
         outer.pack(fill="both", expand=True)
-        ttk.Label(outer, foreground=MUTED, justify="left", text=(
+        ttk.Label(outer, foreground=MUTED, justify="left", text=_(
             "Всё применяется сразу. Настройки камеры перезапускают её сами.\n"
             "«По умолчанию» возвращает значения, с которыми AirMouse работает из коробки.")).pack(anchor="w")
         tabs = ttk.Notebook(outer)
@@ -50,13 +51,13 @@ class AdvancedSettings:
         self.rows = {}
         for group in tuning.GROUPS:
             page = ttk.Frame(tabs, padding=(14, 10))
-            tabs.add(page, text=group)
+            tabs.add(page, text=_(group))
             for param in (p for p in tuning.PARAMS if p.group == group):
                 self.rows[param.key] = self._row(page, param)
         row = ttk.Frame(outer)
         row.pack(fill="x", pady=(14, 0))
-        ttk.Button(row, text="По умолчанию", command=self._reset).pack(side="left")
-        ttk.Button(row, text="Готово", style=ACCENT_BUTTON, command=self.close).pack(side="right")
+        ttk.Button(row, text=_("По умолчанию"), command=self._reset).pack(side="left")
+        ttk.Button(row, text=_("Готово"), style=ACCENT_BUTTON, command=self.close).pack(side="right")
         win.update_idletasks()
         x = root.winfo_rootx() + (root.winfo_width() - win.winfo_width()) // 2
         y = root.winfo_rooty() + (root.winfo_height() - win.winfo_height()) // 3
@@ -81,12 +82,12 @@ class AdvancedSettings:
         frame.pack(fill="x", pady=(0, 12))
         head = ttk.Frame(frame)
         head.pack(fill="x")
-        ttk.Label(head, text=param.label).pack(side="left")
+        ttk.Label(head, text=_(param.label)).pack(side="left")
         value_label = ttk.Label(head, foreground=MUTED)
         value_label.pack(side="right")
         value = tuning.get(self.settings, param.key)
         if param.choices:
-            names = [name for _v, name in param.choices]
+            names = [_(name) for _v, name in param.choices]
             var = tk.StringVar(value=format_value(param, value))
             control = ttk.Combobox(frame, textvariable=var, values=names, state="readonly", width=44)
             control.bind("<<ComboboxSelected>>", lambda _e: self._chosen(param, var.get()))
@@ -99,7 +100,7 @@ class AdvancedSettings:
             value_label.configure(text=format_value(param, value))
         control.pack(fill="x", pady=(4, 0))
         if param.hint:
-            ttk.Label(frame, text=param.hint, foreground=MUTED, wraplength=440, justify="left").pack(
+            ttk.Label(frame, text=_(param.hint), foreground=MUTED, wraplength=440, justify="left").pack(
                 anchor="w", pady=(2, 0))
         return var, value_label
 
@@ -110,17 +111,19 @@ class AdvancedSettings:
         self.app._schedule_save()
 
     def _chosen(self, param, name):
-        value = next(v for v, label in param.choices if label == name)
+        value = next(v for v, label in param.choices if _(label) == name)
         tuning.set_value(self.settings, param.key, value)
         self.app._schedule_save()
         self._applied(param)
 
     def _applied(self, param):
-        """After a change that needs more than reading the new value: restart the camera, resize widgets."""
+        """After a change that needs more than reading the new value: restart the camera, resize widgets,
+        show the gestures that are now on."""
         if param.restart:
             self.app.restart_tracker()
         elif param.key == "widget_scale":
             self.app.onscreen.set_scale(self.app.scale() * tuning.get(self.settings, "widget_scale"))
+        self.app._apply_mode()
 
     def _reset(self):
         restart = any(tuning.BY_KEY[key].restart for key in tuning.changed(self.settings))
@@ -138,3 +141,4 @@ class AdvancedSettings:
             self.app.restart_tracker()
         if rescale:
             self.app.onscreen.set_scale(self.app.scale())
+        self.app._apply_mode()

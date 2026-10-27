@@ -7,6 +7,8 @@ import time
 import uuid
 from ctypes import wintypes
 
+from .i18n import _
+
 _user32 = ctypes.WinDLL("user32", use_last_error=True)
 _kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
 _ole32 = ctypes.WinDLL("ole32")
@@ -72,7 +74,7 @@ def parse_keys(text):
         elif len(name) > 1 and name[0] == "f" and name[1:].isdigit() and 1 <= int(name[1:]) <= 24:
             codes.append(0x70 + int(name[1:]) - 1)
         else:
-            raise ValueError(f"Неизвестная клавиша: «{part}»" if part else "Пустая клавиша в сочетании")
+            raise ValueError(_("Неизвестная клавиша: «{}»").format(part) if part else _("Пустая клавиша в сочетании"))
     return codes
 
 
@@ -82,14 +84,35 @@ def key_events(codes):
     return down + [(code, flags | KEYEVENTF_KEYUP) for code, flags in reversed(down)]
 
 
+def _key_input(item, code, flags):
+    item.type = INPUT_KEYBOARD
+    item.u.ki = KEYBDINPUT(wVk=code, wScan=_user32.MapVirtualKeyW(code, 0), dwFlags=flags)
+
+
 def press_keys(text):
     """Press a key combination ("ctrl+c", "win+d", "playpause") in whatever window is active."""
     events = key_events(parse_keys(text))
     inputs = (INPUT * len(events))()
     for item, (code, flags) in zip(inputs, events):
-        item.type = INPUT_KEYBOARD
-        item.u.ki = KEYBDINPUT(wVk=code, wScan=_user32.MapVirtualKeyW(code, 0), dwFlags=flags)
+        _key_input(item, code, flags)
     _user32.SendInput(len(events), inputs, ctypes.sizeof(INPUT))
+
+
+INPUT_MOUSE = 0
+MOUSEEVENTF_WHEEL = 0x0800
+WHEEL_NOTCH = 120
+
+
+def ctrl_wheel(steps):
+    """Zoom in (steps > 0) or out where the cursor is: Ctrl held while the wheel turns, as browsers,
+    documents and pictures understand it."""
+    ctrl = NAMED_KEYS["ctrl"]
+    inputs = (INPUT * 3)()
+    _key_input(inputs[0], ctrl, 0)
+    inputs[1].type = INPUT_MOUSE
+    inputs[1].u.mi = MOUSEINPUT(0, 0, (steps * WHEEL_NOTCH) & 0xFFFFFFFF, MOUSEEVENTF_WHEEL, 0, 0)
+    _key_input(inputs[2], ctrl, KEYEVENTF_KEYUP)
+    _user32.SendInput(3, inputs, ctypes.sizeof(INPUT))
 
 
 # -- windows ------------------------------------------------------------------------------
@@ -101,6 +124,24 @@ _user32.GetWindowThreadProcessId.argtypes = (wintypes.HWND, ctypes.POINTER(winty
 _user32.GetClassNameW.argtypes = (wintypes.HWND, wintypes.LPWSTR, ctypes.c_int)
 _user32.IsZoomed.argtypes = (wintypes.HWND,)
 _user32.ShowWindow.argtypes = (wintypes.HWND, ctypes.c_int)
+_user32.WindowFromPoint.argtypes = (wintypes.POINT,)
+_user32.WindowFromPoint.restype = wintypes.HWND
+_user32.GetAncestor.argtypes = (wintypes.HWND, wintypes.UINT)
+_user32.GetAncestor.restype = wintypes.HWND
+GA_ROOT = 2
+
+
+def own_window_at(point):
+    """True if AirMouse's own window (the main window or an on-screen panel) is at this screen point.
+    Click-through windows (the cursor ring) are not found there."""
+    if point is None:
+        return False
+    hwnd = _user32.WindowFromPoint(wintypes.POINT(int(point[0]), int(point[1])))
+    if not hwnd:
+        return False
+    pid = wintypes.DWORD()
+    _user32.GetWindowThreadProcessId(_user32.GetAncestor(hwnd, GA_ROOT) or hwnd, ctypes.byref(pid))
+    return pid.value == os.getpid()
 
 
 def window_command(name):
@@ -128,11 +169,11 @@ def open_target(target):
     """Open a program, file, folder or web address as Explorer would. Returns an error text, or None."""
     target = os.path.expandvars(target.strip().strip('"'))
     if not target:
-        return "Не указано, что открыть"
+        return _("Не указано, что открыть")
     try:
         os.startfile(target)
     except OSError:
-        return f"Не удалось открыть «{target}»"
+        return _("Не удалось открыть «{}»").format(target)
     return None
 
 
@@ -150,7 +191,7 @@ def run_action(action):
         return None
     if do == "open":
         return open_target(value)
-    return "Неизвестное действие"
+    return _("Неизвестное действие")
 
 
 def check_action(action):
@@ -162,8 +203,8 @@ def check_action(action):
             return str(exc)
         return None
     if action.get("do") == "open":
-        return None if str(action.get("value", "")).strip() else "Не указано, что открыть"
-    return "Неизвестное действие"
+        return None if str(action.get("value", "")).strip() else _("Не указано, что открыть")
+    return _("Неизвестное действие")
 
 
 # -- volume (Windows Core Audio through COM) ----------------------------------------------

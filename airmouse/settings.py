@@ -11,7 +11,8 @@ SETTINGS_FILE = SETTINGS_DIR / "settings.json"
 
 @dataclass
 class Settings:
-    design: str = "glass"           # window design: "glass" (Liquid Glass) or "classic"
+    design: str = "glass"           # window design: "glass" (Liquid Glass), "nature" or "classic"
+    language: str = ""              # "ru" or "en"; "" until the first start picks one (see i18n.py)
     mode: str = "hand"              # what moves the cursor: "hand", "gaze" (eyes) or "head"
     camera_index: int = 0
     smoothing: float = 0.7          # 0 = fastest, 1 = most stable
@@ -41,6 +42,8 @@ class Settings:
             data = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             return settings
+        if isinstance(data, dict) and "language" not in data:
+            settings.language = "ru"     # settings from before there was a choice: AirMouse spoke Russian
         for f in fields(cls):
             if f.name in data:
                 try:

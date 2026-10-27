@@ -17,6 +17,8 @@ import time
 from ctypes import wintypes
 from pathlib import Path
 
+from .i18n import _
+
 FPS = 30
 SCREEN_W, SCREEN_H = 1920, 1080
 FRAME_W, FRAME_H = 640, 480
@@ -190,10 +192,13 @@ class _WidgetEnv:
         self.frame_id = 0
 
     def status(self):
-        return "Курсор", (94, 224, 122), f"{30 - self.frame_id % 2} кадр/с"
+        return "Курсор", (94, 224, 122), _("{:.0f} кадр/с").format(30 - self.frame_id % 2)
 
     def camera_on(self):
         return True
+
+    def dwell_state(self):
+        return "left", False
 
     def cursor(self):
         return 0, 0
@@ -343,11 +348,13 @@ def hand(ox, oy, pinch=0.0, pose="open", left=False):
     pinch: how far the thumb tip has moved to the index tip (0 = open hand, 1 = touching).
     pose: "open"; "two" folds the ring and little fingers (scroll); "right" aims the
     thumb between the index and middle tips (right click); "thumb" is a fist with
-    the thumb up (shows / hides the on-screen widgets), "thumb_down" with it down.
+    the thumb up (shows / hides the on-screen widgets), "thumb_down" with it down;
+    "l" keeps only the index finger up, the thumb out to the side (the precise cursor).
     left: the user's left hand (in the mirrored picture its thumb is on the right).
     """
     mcp = {5: (ox - 50, oy + 5), 9: (ox, oy), 13: (ox + 50, oy + 5), 17: (ox + 95, oy + 15)}
-    folded = {13, 17} if pose == "two" else set(mcp) if pose in ("thumb", "thumb_down") else set()
+    folded = ({13, 17} if pose == "two" else set(mcp) if pose in ("thumb", "thumb_down")
+              else {9, 13, 17} if pose == "l" else set())
     pts = [None] * 21
     pts[0] = (ox, oy + 100, 0.0)
     for i, (mx, my) in mcp.items():
@@ -683,12 +690,142 @@ def dwell_clicks(seed=12):
     return {"clicks": len(clicks), "first_after_s": round(first[0] - 100.0, 2) if first else None}
 
 
+def _tuned(**values):
+    from . import tuning
+    from .settings import Settings
+    settings = Settings()
+    for key, value in values.items():
+        tuning.set_value(settings, key, value)
+    return settings
+
+
+def precise_cursor(seed=13):
+    """The pointer hand moves the same way twice, the second time with the other hand in an «L»:
+    how much of the movement reaches the cursor, and how far the cursor jumps when the «L» ends
+    (a click with the other hand right after must land where the cursor was aimed)."""
+    moved = []
+    for pose in ("open", "l"):
+        sim = TwoHandSim(seed)
+        left = dict(ox=LEFT_REST[0], oy=LEFT_REST[1], pose=pose)
+        sim.rest(40, dict(ox=RIGHT_REST[0], oy=RIGHT_REST[1]), left)
+        start = sim.cursor
+        for i in range(1, 31):                    # one second, 60 camera px to the right
+            sim.step(dict(ox=RIGHT_REST[0] + 2 * i, oy=RIGHT_REST[1]), left)
+        sim.rest(10, dict(ox=RIGHT_REST[0] + 60, oy=RIGHT_REST[1]), left)
+        moved.append(sim.cursor[0] - start[0])
+    aimed = sim.cursor
+    right = dict(ox=RIGHT_REST[0] + 60, oy=RIGHT_REST[1])
+    sim.rest(15, right, dict(ox=LEFT_REST[0], oy=LEFT_REST[1]))      # the «L» ends, the pointer hand stays
+    jump = math.dist(aimed, sim.cursor)
+    for p in (0.4, 0.8, 1.0, 1.0, 1.0, 0.6, 0.2, 0.0):
+        sim.step(right, dict(ox=LEFT_REST[0], oy=LEFT_REST[1], pinch=p))
+    clicks = [c for _t, a, c in sim.events if a == ("down", "left")]
+    return {"share_of_movement": round(moved[1] / moved[0], 2), "jump_after_px": round(jump, 1),
+            "click_from_aim_px": round(math.dist(aimed, clicks[0]), 1) if clicks else None}
+
+
+def zoom_gesture(seed=14):
+    """Both hands «V», moved apart and then back together: zoom steps, and nothing else."""
+    sim = TwoHandSim(seed)
+    rx, lx, y = RIGHT_REST[0] - 30, LEFT_REST[0] + 70, RIGHT_REST[1]
+    sim.rest(20, dict(ox=rx, oy=y, pose="two"), dict(ox=lx, oy=y, pose="two"))
+    found = []
+    for spread in (80, -80):                      # each hand 80 camera px out, then back in
+        before = len(sim.events)
+        for i in range(1, 16):
+            k = i / 15
+            d = spread * k if spread > 0 else 80 + spread * k
+            sim.step(dict(ox=rx + d, oy=y, pose="two"), dict(ox=lx - d, oy=y, pose="two"))
+        sim.rest(10, dict(ox=rx + max(spread, 0), oy=y, pose="two"), dict(ox=lx - max(spread, 0), oy=y, pose="two"))
+        found.append([a for _t, a, _c in sim.events[before:]])
+    steps = [sum(a[1] for a in part if a[0] == "zoom") for part in found]
+    others = [a for part in found for a in part if a[0] != "zoom"]
+    return {"zoom_in_steps": steps[0], "zoom_out_steps": steps[1], "other_actions": len(others)}
+
+
+def swipes(seed=15):
+    """«Взмах второй рукой» set to slides: a swipe each way is one key each; spreading both hands
+    (all windows) and a hand that comes into view moving are not swipes."""
+    sim = TwoHandSim(seed, settings=_tuned(swipe_action=2))
+    right, y = dict(ox=RIGHT_REST[0] + 40, oy=RIGHT_REST[1]), LEFT_REST[1]
+    found = {}
+    for name, (x0, x1) in (("to_the_left", (230, 60)), ("to_the_right", (60, 230))):
+        sim.rest(30, right, dict(ox=x0, oy=y))
+        before = len(sim.events)
+        for i in range(1, 7):                     # a fifth of a second
+            sim.step(right, dict(ox=x0 + (x1 - x0) * i / 6, oy=y))
+        sim.rest(30, right, dict(ox=x1, oy=y))
+        found[name] = [a for _t, a, _c in sim.events[before:]]
+    before = len(sim.events)
+    sim.rest(40, dict(ox=330, oy=RIGHT_REST[1]), dict(ox=250, oy=y))
+    for i in range(1, 11):                        # both hands apart: all windows, no swipe
+        k = i / 10
+        sim.step(dict(ox=330 + 190 * k, oy=RIGHT_REST[1]), dict(ox=250 - 190 * k, oy=y))
+    sim.rest(40, dict(ox=520, oy=RIGHT_REST[1]), dict(ox=60, oy=y))
+    found["both_apart"] = [a for _t, a, _c in sim.events[before:]]
+    before = len(sim.events)
+    sim.rest(40, right, None)
+    for i in range(8):                            # the hand comes into view, already moving
+        sim.step(right, dict(ox=250 - 25 * i, oy=y))
+    sim.rest(30, right, dict(ox=50, oy=y))
+    found["coming_into_view"] = [a for _t, a, _c in sim.events[before:]]
+    return {"next": found["to_the_left"] == [("keys", "right")],
+            "previous": found["to_the_right"] == [("keys", "left")],
+            "both_apart_is_all_windows": found["both_apart"] == [("keys", "win+tab")],
+            "coming_into_view": len(found["coming_into_view"])}
+
+
+def one_hand_pause(seed=16):
+    """Only one hand: a thumbs down held pauses, nothing works while paused, a thumbs down again resumes."""
+    sim = TwoHandSim(seed)
+    hand_at = dict(ox=RIGHT_REST[0], oy=RIGHT_REST[1])
+    sim.rest(30, hand_at)
+    start = sim.t
+    sim.rest(40, dict(hand_at, pose="thumb_down"))
+    paused_after = next((t - start for t, a, _c in sim.events if a == ("pause",)), None)
+    sim.rest(15, hand_at)
+    before = len(sim.events)
+    for p in (0.4, 0.8, 1.0, 1.0, 1.0, 0.6, 0.2, 0.0):          # a pinch while paused
+        sim.step(dict(hand_at, pinch=p))
+    while_paused = len(sim.events) - before
+    sim.rest(40, dict(hand_at, pose="thumb_down"))
+    sim.rest(15, hand_at)
+    return {"pauses": sim.actions().count(("pause",)), "seconds_to_pause": round(paused_after, 2),
+            "actions_while_paused": while_paused, "enabled_after": sim.enabled}
+
+
+def dwell_kinds(seed=17):
+    """The panel «Клик задержкой» picks the next dwell: double, right, then a drag (down here, up there).
+    Each is for one dwell; after it the dwell clicks as usual."""
+    sim = TwoHandSim(seed, settings=_tuned(dwell_click=1, dwell_ms=600))
+    places = [cam_for(600 + 150 * i, 500) for i in range(6)]
+    found = []
+    for i, (kind, (x, y)) in enumerate(zip(("left", "double", "right", None, "drag", None), places)):
+        if i:
+            px, py = places[i - 1]
+            for j in range(1, 11):                # move on to the next place
+                sim.step(dict(ox=px + (x - px) * j / 10, oy=py + (y - py) * j / 10))
+        if kind is not None:
+            sim.control.dwell.choose(kind)
+        before = len(sim.events)
+        sim.rest(40, dict(ox=x, oy=y))
+        found.append([a for _t, a, _c in sim.events[before:]])
+    expected = [[("click", "left")], [("click", "left"), ("click", "left")], [("click", "right")],
+                [("click", "left")], [("down", "left")], [("up", "left")]]
+    return {"as_picked": found == expected, "kind_after": sim.control.dwell.kind}
+
+
 def two_hands_quality():
     return {
         "second_hand_clicks": second_hand_clicks(),
         "resting_false_actions_per_min": two_hands_resting(),
         "gestures": two_hand_gestures(),
         "dwell": dwell_clicks(),
+        "precise_cursor": precise_cursor(),
+        "zoom": zoom_gesture(),
+        "swipes": swipes(),
+        "one_hand_pause": one_hand_pause(),
+        "dwell_kinds": dwell_kinds(),
     }
 
 

@@ -4,6 +4,7 @@ import time
 import tkinter as tk
 
 from .face import GazeModel
+from .i18n import _
 
 BG = "#101114"
 DOT = "#4f8ef7"
@@ -100,15 +101,15 @@ class GazeCalibration:
             core = TEXT if elapsed > SETTLE_TIME else DOT
             c.create_oval(x - 6, y - 6, x + 6, y + 6, fill=core, outline="")
             number = self._step - 1
-            c.create_text(self.w // 2, int(self.h * 0.3), text=DOT_TEXT, fill=MUTED, font=("Segoe UI", 14))
+            c.create_text(self.w // 2, int(self.h * 0.3), text=_(DOT_TEXT), fill=MUTED, font=("Segoe UI", 14))
             c.create_text(self.w // 2, int(self.h * 0.3) + 32, text=f"{number} / {self.dot_count}",
                           fill=MUTED, font=("Segoe UI", 12))
         else:
             c.create_oval(x - 10, y - 10, x + 10, y + 10, fill=DOT, outline="")
             if kind == "intro":
-                text = "Калибровка взгляда\nСмотрите на точки, пока они не исчезнут. Esc — отмена."
+                text = _("Калибровка взгляда\nСмотрите на точки, пока они не исчезнут. Esc — отмена.")
             else:
-                text = HEAD_TEXT
+                text = _(HEAD_TEXT)
             c.create_text(x, int(self.h * 0.3), text=text, fill=TEXT, font=("Segoe UI", 18), justify="center")
 
     def _fit(self):
@@ -116,9 +117,9 @@ class GazeCalibration:
         c = self.canvas
         c.delete("all")
         if model is None:
-            text = "Не получилось: глаза плохо видны.\nПроверьте освещение и попробуйте ещё раз."
+            text = _("Не получилось: глаза плохо видны.\nПроверьте освещение и попробуйте ещё раз.")
         else:
-            text = f"Готово!\nСредняя ошибка ≈ {model.error:.0f} px"
+            text = _("Готово!\nСредняя ошибка ≈ {:.0f} px").format(model.error)
         c.create_text(self.w // 2, self.h // 2, text=text, fill=TEXT, font=("Segoe UI", 20), justify="center")
         self.target = None
         self.win.after(int(RESULT_TIME * 1000), lambda: self._finish(model))

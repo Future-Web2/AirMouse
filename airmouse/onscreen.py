@@ -12,6 +12,7 @@ copies in the program you were using. Drag a widget by its background to move it
   buttons   your own panel: buttons that press key combinations or open things
   notebook  pages to draw on, like Paint: pinch on the paper and move the hand
             (opened on purpose, so it shows even while the camera is off)
+  dwell     which click the next dwell click makes (shown while the dwell click is on)
 
 The cursor ring follows the cursor and shows the gesture in progress: it fills
 as the fingers close (or the eyes stay shut) and flashes on a click.
@@ -33,8 +34,10 @@ from . import system, tuning, winmouse
 from .face import EYES_CLOSED, NO_FACE
 from .gestures import DRAG, MOVE, NO_HAND, PENDING, PRESSED, RIGHT, SCROLL
 from .glass import condensation
+from .i18n import _
 from .notebook import COLORS, PAGE_H, PAGE_W, Notebook
 from .overlay import Layer, LayeredWindow, cursor_pos, round_mask
+from .twohands import PRECISE, ZOOM
 
 TEXT = (245, 247, 250)
 MUTED = (170, 178, 192)
@@ -45,6 +48,8 @@ YELLOW = (255, 204, 64)
 ORANGE = (255, 128, 84)
 PURPLE = (200, 128, 255)
 BLUE = (84, 180, 255)
+CYAN = (90, 220, 230)
+TEAL = (120, 230, 200)
 RED = (255, 98, 112)
 GREY = (150, 155, 168)
 
@@ -57,7 +62,7 @@ ICON_UNDO, ICON_CLEAR, ICON_COPY, ICON_FOLDER = "", "", "", ""
 ICON_BACK, ICON_FORWARD, ICON_ADD = "", "", ""
 ICON_BIG, ICON_SMALL, ICON_CLOSE = "", "", ""
 
-KINDS = ("status", "clock", "volume", "media", "system", "buttons", "notebook")
+KINDS = ("status", "clock", "volume", "media", "system", "buttons", "notebook", "dwell")
 NAMES = {
     "status": "AirMouse: камера и жест",
     "clock": "Часы",
@@ -66,6 +71,7 @@ NAMES = {
     "system": "Нагрузка компьютера",
     "buttons": "Панель кнопок",
     "notebook": "Блокнот: рисовать рукой",
+    "dwell": "Клик задержкой: какой клик",
 }
 MAX_BUTTONS = 12
 DEFAULT_BUTTONS = (
@@ -97,6 +103,7 @@ def default_widgets():
         {"type": "clock", "on": False},
         {"type": "system", "on": False},
         {"type": "notebook", "on": False},
+        {"type": "dwell", "on": True},       # shows only while the dwell click is on
     ]
 
 
@@ -168,6 +175,10 @@ class Widget:
     def parts(self):
         """Clickable parts: [(name, (x, y, w, h))] in logical panel coordinates."""
         return []
+
+    def wanted(self, settings):
+        """False: not shown now, even when switched on (a panel for a feature that is off)."""
+        return True
 
     def part_at(self, x, y):
         lx, ly = (x - self.m) / self.s, (y - self.m) / self.s
@@ -310,7 +321,7 @@ class StatusWidget(Widget):
             self.dirty = True
 
     def draw_static(self, layer):
-        self.text(layer, "Ctrl+Alt+M — пауза   ·   палец вверх — скрыть", 140, 246, 11, DIM, anchor="mm")
+        self.text(layer, _("Ctrl+Alt+M — пауза   ·   палец вверх — скрыть"), 140, 246, 11, DIM, anchor="mm")
 
     def draw(self, layer, now):
         self._drawn = now
@@ -336,7 +347,7 @@ class StatusWidget(Widget):
                 self.text(layer, fps, x + w - 45, y + h - 18, 11, TEXT, anchor="mm")
         else:
             layer.round_rect(px, py, w * self.s, h * self.s, 12 * self.s, (0, 0, 0), 0.35)
-            text = "Камера включается…" if self.env.camera_on() else "Камера выключена"
+            text = _("Камера включается…") if self.env.camera_on() else _("Камера выключена")
             self.text(layer, text, x + w / 2, y + h / 2, 13, MUTED, anchor="mm")
 
 
@@ -356,7 +367,9 @@ class ClockWidget(Widget):
     def draw(self, layer, now):
         moment = datetime.now()
         self.text(layer, moment.strftime("%H:%M"), 20, 38, 38, weight="bold")
-        self.text(layer, f"{DAYS[moment.weekday()]}, {moment.day} {MONTHS[moment.month - 1]}", 21, 72, 13, MUTED)
+        date = _("{weekday}, {day} {month}").format(weekday=_(DAYS[moment.weekday()]), day=moment.day,
+                                                    month=_(MONTHS[moment.month - 1]))
+        self.text(layer, date, 21, 72, 13, MUTED)
 
 
 class VolumeWidget(Widget):
@@ -421,7 +434,7 @@ class VolumeWidget(Widget):
         silent = self.muted or not self.level
         layer.icon(ICON_MUTE if silent else ICON_VOLUME, *self.at(36, 36), 18 * self.s, MUTED if silent else TEXT)
         if self.level is None:
-            self.text(layer, "Нет звукового устройства", 72, 36, 13, MUTED)
+            self.text(layer, _("Нет звукового устройства"), 72, 36, 13, MUTED)
             return
         x0, x1 = self.TRACK
         tx, ty = self.at(x0, 33)
@@ -490,7 +503,7 @@ class SystemWidget(Widget):
             value = self.values[key]
             if key == "battery" and self.values.get("charging"):
                 label = "Заряжается"
-            self.text(layer, label, 18, y, 13)
+            self.text(layer, _(label), 18, y, 13)
             bx, by = self.at(110, y - 3)
             length = 84 * self.s
             layer.capsule(bx, by, length, 6 * self.s, (255, 255, 255), 0.16)
@@ -547,12 +560,12 @@ class ButtonsWidget(Widget):
 
     def draw_static(self, layer):
         if self.spec.get("title"):
-            self.text(layer, self.spec["title"].upper(), self.PAD + 2, 26, 11, MUTED, "semibold")
+            self.text(layer, _(self.spec["title"]).upper(), self.PAD + 2, 26, 11, MUTED, "semibold")
 
     def draw(self, layer, now):
         buttons = self.spec.get("buttons", [])
         if not buttons:
-            self.text(layer, "Добавьте кнопки в настройках", self.PAD + 2, self._top() + 22, 12, MUTED)
+            self.text(layer, _("Добавьте кнопки в настройках"), self.PAD + 2, self._top() + 22, 12, MUTED)
         for (name, (x, y, w, h)), button in zip(self.parts(), buttons):
             flash = self._flash is not None and name == f"b{self._flash[0]}"
             px, py = self.at(x, y)
@@ -560,7 +573,7 @@ class ButtonsWidget(Widget):
                 layer.round_rect(px, py, w * self.s, h * self.s, 12 * self.s, self.accent(), 0.85)
             else:
                 self.button(layer, name, x, y, w, h)
-            self.text(layer, button["label"], x + w / 2, y + h / 2, 13, TEXT, "semibold", "mm",
+            self.text(layer, _(button["label"]), x + w / 2, y + h / 2, 13, TEXT, "semibold", "mm",
                       max_width=(w - 14) * self.s)
         if self.error:
             _w, h = self.logical_size()
@@ -696,7 +709,7 @@ class NotebookWidget(Widget):
             self.dirty = True
 
     def draw_static(self, layer):
-        self.text(layer, "Блокнот", self.PAD + 8, 24, 15, weight="semibold")
+        self.text(layer, _("Блокнот"), self.PAD + 8, 24, 15, weight="semibold")
 
     def draw(self, layer, now):
         book, s = self.book, self.s
@@ -765,8 +778,56 @@ class NotebookWidget(Widget):
             region[c] = cv2.blendLinear(under, np.ascontiguousarray(bgra[c]), 1 - m, m)
 
 
+class DwellWidget(Widget):
+    """«Клик задержкой»: which click the next dwell makes, for people who click by holding the cursor still.
+
+    «Клик» is the usual one; double, right and drag are for one dwell each (a drag presses the
+    button at one dwell and lets it go at the next). Over this panel a dwell is always a plain
+    click, so the panel can be worked whatever is picked. Shown only while the dwell click is on.
+    """
+
+    KINDS = (("left", "Клик"), ("double", "Двойной"), ("right", "Правый"), ("drag", "Тащить"))
+    BUTTON_W, BUTTON_H, GAP, PAD, TOP = 74, 50, 6, 14, 40
+    width = 2 * PAD + 4 * BUTTON_W + 3 * GAP
+    height = TOP + BUTTON_H + PAD
+
+    def __init__(self, spec, env):
+        super().__init__(spec, env)
+        self._shown = None
+
+    def wanted(self, settings):
+        return bool(tuning.get(settings, "dwell_click"))
+
+    def parts(self):
+        return [(kind, (self.PAD + i * (self.BUTTON_W + self.GAP), self.TOP, self.BUTTON_W, self.BUTTON_H))
+                for i, (kind, _label) in enumerate(self.KINDS)]
+
+    def on_click(self, part):
+        self.env.request(("dwell", part))
+
+    def tick(self, now):
+        if self.env.dwell_state() != self._shown:
+            self.dirty = True
+
+    def draw_static(self, layer):
+        self.text(layer, _("КЛИК ЗАДЕРЖКОЙ"), self.PAD + 2, 22, 11, MUTED, "semibold")
+
+    def draw(self, layer, now):
+        kind, dragging = self._shown = self.env.dwell_state()
+        if dragging:
+            self.text(layer, _("кнопка зажата"), self.width - self.PAD - 2, 22, 11, ORANGE, "semibold", "rm")
+        for (name, (x, y, w, h)), (_kind, label) in zip(self.parts(), self.KINDS):
+            if name == kind:
+                layer.round_rect(*self.at(x, y), w * self.s, h * self.s, 12 * self.s, self.accent(), 0.9)
+            else:
+                self.button(layer, name, x, y, w, h)
+            if name == "drag" and dragging:
+                label = "Отпустить"
+            self.text(layer, _(label), x + w / 2, y + h / 2, 13, TEXT, "semibold", "mm", max_width=(w - 8) * self.s)
+
+
 WIDGET_CLASSES = {"status": StatusWidget, "clock": ClockWidget, "volume": VolumeWidget, "media": MediaWidget,
-                  "system": SystemWidget, "buttons": ButtonsWidget, "notebook": NotebookWidget}
+                  "system": SystemWidget, "buttons": ButtonsWidget, "notebook": NotebookWidget, "dwell": DwellWidget}
 
 
 # -- cursor ring --------------------------------------------------------------------------
@@ -779,7 +840,7 @@ class CursorRing:
     FLASH = 0.35         # seconds a click flash lasts
 
     COLORS = {MOVE: (255, 255, 255), PENDING: YELLOW, PRESSED: YELLOW, EYES_CLOSED: YELLOW, DRAG: ORANGE,
-              RIGHT: PURPLE, SCROLL: BLUE}
+              RIGHT: PURPLE, SCROLL: BLUE, PRECISE: CYAN, ZOOM: TEAL}
 
     def __init__(self, s):
         self.s = s
@@ -800,7 +861,7 @@ class CursorRing:
         if self._flash and now - self._flash[1] < self.FLASH:
             flash = (self._flash[0], round((now - self._flash[1]) / self.FLASH, 1))
         wheel = self._wheel[0] if self._wheel and now - self._wheel[1] < 0.25 else 0
-        if mode not in (MOVE, PENDING, EYES_CLOSED):
+        if mode not in (MOVE, PENDING, EYES_CLOSED, PRECISE):
             progress = 0.0
         return mode, round(progress, 2) if progress > 0.03 else 0.0, flash, wheel
 
@@ -809,11 +870,17 @@ class CursorRing:
         s, c = self.s, self.size / 2
         layer = Layer(self.size, self.size)
         color = self.COLORS.get(mode, GREY)
-        r = self.RADIUS * s
-        strong = mode in (PRESSED, DRAG, RIGHT, SCROLL, PENDING)
+        r = (self.RADIUS - 7 if mode == PRECISE else self.RADIUS) * s
+        strong = mode in (PRESSED, DRAG, RIGHT, SCROLL, PENDING, ZOOM)
         width = (3.2 if strong else 1.6) * s
         layer.arc(c, c, r, width + 2 * s, (0, 0, 0), 0.3)      # a dark halo keeps it visible on white
         layer.arc(c, c, r, width, color, 0.95 if strong else 0.7)
+        if mode == PRECISE:          # a small ring with a crosshair: the cursor goes slowly, for fine aiming
+            for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                near, tick = r + 3 * s, 7 * s
+                x = c + dx * (near + tick / 2) - (tick if dx else 2 * s) / 2
+                y = c + dy * (near + tick / 2) - (tick if dy else 2 * s) / 2
+                layer.capsule(x, y, tick if dx else 2 * s, tick if dy else 2 * s, color, 0.95)
         if progress:
             layer.arc(c, c, r, 3.6 * s, YELLOW, 0.95, extent=360 * progress)
         if mode == SCROLL:
@@ -866,6 +933,11 @@ class OnScreen:
 
     def camera_on(self):
         return self.app.tracker is not None
+
+    def dwell_state(self):
+        """(kind of the next dwell click, a dwell drag holds the button) of the running tracker."""
+        dwell = getattr(self.app.tracker, "dwell", None)
+        return (dwell.kind, dwell.dragging) if dwell is not None else ("left", False)
 
     def place(self, widget):
         for w, window in self.items:
@@ -996,7 +1068,7 @@ class OnScreen:
         show = False
         first = 1   # widgets drawn for the first time this tick: tens of ms each, so one per tick
         for widget, window in self.items:
-            if on and widget.spec["on"] and (running or always or widget.ANYTIME):
+            if on and widget.spec["on"] and (running or always or widget.ANYTIME) and widget.wanted(self.settings):
                 show = True
                 widget.tick(now)
                 if widget.dirty or not window.visible:
@@ -1055,9 +1127,13 @@ class OnScreen:
                 self.app.open_widget_editor()
             elif item[0] == "notebook":
                 self.toggle_notebook()
+            elif item[0] == "dwell":
+                dwell = getattr(self.app.tracker, "dwell", None)
+                if dwell is not None:
+                    dwell.choose(item[1])
             elif item[0] == "copy_page":
                 widget = item[1]
-                widget.show_note("Скопировано: вставьте Ctrl+V" if widget.book.copy() else "Не удалось скопировать")
+                widget.show_note(_("Скопировано: вставьте Ctrl+V") if widget.book.copy() else _("Не удалось скопировать"))
             elif item[0] == "open_folder":
                 try:
                     item[1].mkdir(parents=True, exist_ok=True)
