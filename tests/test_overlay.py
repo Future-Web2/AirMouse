@@ -1,20 +1,26 @@
 """Floating windows and the RGBA picture they show.
 
-The windows made here show fully transparent pictures far off-screen, so the
-user sees nothing; mouse messages are sent to them directly.
+The Windows windows made here show fully transparent pictures far off-screen, so the
+user sees nothing; mouse messages are sent to them directly. (The Linux ones: test_linux.py.)
 """
 
 import ctypes
+import sys
 import unittest
-from ctypes import wintypes
 
 import numpy as np
 
-from airmouse import overlay
-from airmouse.overlay import Layer, LayeredWindow
+from airmouse.overlay import Layer
 
-user32 = ctypes.WinDLL("user32")
-user32.IsWindow.argtypes = (wintypes.HWND,)
+WINDOWS = sys.platform == "win32"
+if WINDOWS:
+    from ctypes import wintypes
+
+    from airmouse import winoverlay
+    from airmouse.winoverlay import LayeredWindow
+
+    user32 = ctypes.WinDLL("user32")
+    user32.IsWindow.argtypes = (wintypes.HWND,)
 
 
 def lparam(x, y):
@@ -67,6 +73,7 @@ class LayerTest(unittest.TestCase):
         self.assertGreater(float(layer.alpha[10, 10]), 0.9)
 
 
+@unittest.skipUnless(WINDOWS, "Windows windows")
 class WindowTest(unittest.TestCase):
     def setUp(self):
         self.calls = []
@@ -77,22 +84,22 @@ class WindowTest(unittest.TestCase):
         self.window.destroy()
 
     def send(self, msg, wparam=0, lp=0):
-        return overlay.user32.SendMessageW(self.window.hwnd, msg, wparam, lp)
+        return winoverlay.user32.SendMessageW(self.window.hwnd, msg, wparam, lp)
 
     def test_style_never_takes_the_focus(self):
-        ex = overlay.user32.GetWindowLongW(self.window.hwnd, -20)
-        for flag in (overlay.WS_EX_LAYERED, overlay.WS_EX_TOPMOST, overlay.WS_EX_TOOLWINDOW,
-                     overlay.WS_EX_NOACTIVATE):
+        ex = winoverlay.user32.GetWindowLongW(self.window.hwnd, -20)
+        for flag in (winoverlay.WS_EX_LAYERED, winoverlay.WS_EX_TOPMOST, winoverlay.WS_EX_TOOLWINDOW,
+                     winoverlay.WS_EX_NOACTIVATE):
             self.assertTrue(ex & flag)
-        self.assertFalse(ex & overlay.WS_EX_TRANSPARENT)
-        self.assertEqual(self.send(overlay.WM_MOUSEACTIVATE), overlay.MA_NOACTIVATE)
+        self.assertFalse(ex & winoverlay.WS_EX_TRANSPARENT)
+        self.assertEqual(self.send(winoverlay.WM_MOUSEACTIVATE), winoverlay.MA_NOACTIVATE)
         self.assertTrue(self.window.visible)
 
     def test_mouse_messages(self):
-        self.send(overlay.WM_MOUSEMOVE, 0, lparam(5, 6))
-        self.send(overlay.WM_LBUTTONDOWN, 1, lparam(10, 12))
-        self.send(overlay.WM_LBUTTONUP, 0, lparam(11, 13))
-        self.send(overlay.WM_MOUSEWHEEL, (-120 & 0xFFFF) << 16, lparam(-9000 + 7, -9000 + 8))
+        self.send(winoverlay.WM_MOUSEMOVE, 0, lparam(5, 6))
+        self.send(winoverlay.WM_LBUTTONDOWN, 1, lparam(10, 12))
+        self.send(winoverlay.WM_LBUTTONUP, 0, lparam(11, 13))
+        self.send(winoverlay.WM_MOUSEWHEEL, (-120 & 0xFFFF) << 16, lparam(-9000 + 7, -9000 + 8))
         kinds = [c[0] for c in self.calls]
         self.assertEqual(kinds[:4], ["move", "down", "up", "cancel"])   # releasing the capture comes after "up"
         self.assertEqual(self.calls[1][1:3], (10, 12))
@@ -104,19 +111,20 @@ class WindowTest(unittest.TestCase):
         self.window.move(-9200, -9150)
         self.assertEqual((self.window.x, self.window.y), (-9200, -9150))
         self.window.hide()
-        self.assertFalse(overlay.user32.IsWindowVisible(self.window.hwnd))
+        self.assertFalse(winoverlay.user32.IsWindowVisible(self.window.hwnd))
 
 
+@unittest.skipUnless(WINDOWS, "Windows windows")
 class ClickThroughTest(unittest.TestCase):
     def test_click_through_window(self):
         window = LayeredWindow(click_through=True)
         try:
-            ex = overlay.user32.GetWindowLongW(window.hwnd, -20)
-            self.assertTrue(ex & overlay.WS_EX_TRANSPARENT)
+            ex = winoverlay.user32.GetWindowLongW(window.hwnd, -20)
+            self.assertTrue(ex & winoverlay.WS_EX_TRANSPARENT)
         finally:
             hwnd = window.hwnd
             window.destroy()
-        self.assertNotIn(hwnd, overlay._windows)
+        self.assertNotIn(hwnd, winoverlay._windows)
         self.assertFalse(user32.IsWindow(hwnd))
 
 

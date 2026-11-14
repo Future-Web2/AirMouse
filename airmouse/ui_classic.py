@@ -13,23 +13,13 @@ try:
 except ImportError:
     sv_ttk = None
 
-from . import tuning
+from . import system, tuning
 from .app_base import CALIBRATE_TEXT, DESIGNS, METERS, MODES, BaseApp, gesture_rows, meter_value, translated
 from .i18n import LANGUAGE_LABEL, LANGUAGES, _
 
 PREVIEW_W, PREVIEW_H = 480, 360
 PREVIEW_BG = "#1b1b1b"
 MUTED = "#8a8a8a"
-
-
-def _system_uses_dark_theme():
-    try:
-        import winreg
-        path = r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"
-        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, path) as key:
-            return winreg.QueryValueEx(key, "AppsUseLightTheme")[0] == 0
-    except OSError:
-        return False
 
 
 def _dark_title_bar(window):
@@ -46,7 +36,7 @@ def _dark_title_bar(window):
 class App(BaseApp):
     def __init__(self, autostart=False):
         super().__init__(autostart)
-        dark = _system_uses_dark_theme()
+        dark = system.dark_theme()
         if sv_ttk is not None:
             sv_ttk.set_theme("dark" if dark else "light")
         self._build()

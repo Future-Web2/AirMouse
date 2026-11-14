@@ -167,7 +167,7 @@ class WidgetTest(unittest.TestCase):
         self.assertGreater(env.saved, 0)
 
     def test_big_fits_the_screen_and_comes_back(self):
-        with mock.patch.object(onscreen.winmouse, "screen_size", lambda: (1920, 1080)):
+        with mock.patch.object(onscreen.system, "screen_size", lambda: (1920, 1080)):
             for s in (1.0, 1.5):
                 widget, _env = make_widget(s, x=40, y=30)
                 small = widget.panel_size()

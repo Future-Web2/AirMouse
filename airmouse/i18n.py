@@ -7,11 +7,15 @@ tests/test_i18n.py checks that every Russian text in airmouse/ has its English l
 """
 
 import ctypes
+import os
+import sys
 
 LANGUAGES = (("ru", "Русский"), ("en", "English"))
 LANGUAGE_LABEL = "Язык · Language"     # in both, so it can be found whichever language is on
-# Windows languages whose speakers mostly read Russian: Russian, Belarusian, Kazakh, Kyrgyz, Tajik, Uzbek.
+# Languages whose speakers mostly read Russian: Russian, Belarusian, Kazakh, Kyrgyz, Tajik, Uzbek
+# (Windows language numbers, and the same as Linux locale names).
 RUSSIAN_READERS = {0x19, 0x23, 0x3F, 0x40, 0x28, 0x43}
+RUSSIAN_LOCALES = {"ru", "be", "kk", "ky", "tg", "uz"}
 
 _language = "ru"
 
@@ -33,7 +37,10 @@ def _(text):
 
 
 def system_language():
-    """The first language for a new user: Russian if Windows speaks it (or a neighbour of it), else English."""
+    """The first language for a new user: Russian if the system speaks it (or a neighbour of it), else English."""
+    if sys.platform != "win32":       # Linux: the locale, e.g. LANG=ru_RU.UTF-8
+        locale = os.environ.get("LC_ALL") or os.environ.get("LC_MESSAGES") or os.environ.get("LANG") or ""
+        return "ru" if locale[:2].lower() in RUSSIAN_LOCALES else "en"
     try:
         primary = ctypes.windll.kernel32.GetUserDefaultUILanguage() & 0x3FF
     except (AttributeError, OSError):
@@ -178,6 +185,10 @@ EN = {
     "Не удалось открыть камеру №{}.\nПроверьте, что она подключена и не занята другой программой.":
         "Could not open camera #{}.\nCheck that it is connected and not used by another program.",
     "Камера перестала отдавать изображение.": "The camera stopped sending pictures.",
+    "Нет доступа к /dev/uinput, поэтому AirMouse не может двигать мышь.\n"
+    "Добавьте себя в группу input и правило udev (см. README), затем войдите в систему заново.":
+        "No access to /dev/uinput, so AirMouse cannot move the mouse.\n"
+        "Add yourself to the input group and the udev rule (see the README), then log in again.",
 
     # on-screen widgets (onscreen.py)
     "AirMouse: камера и жест": "AirMouse: camera and gesture",

@@ -5,6 +5,7 @@ A design (ui.py for Liquid Glass, ui_classic.py for the classic look) subclasses
 BaseApp, builds its window in __init__ and implements the hooks at the bottom.
 """
 
+import sys
 import time
 import tkinter as tk
 from collections import deque
@@ -12,7 +13,7 @@ from tkinter import messagebox
 
 import cv2
 
-from . import i18n, resource_path, system, tuning, winmouse
+from . import i18n, resource_path, system, tuning
 from .calibration import GazeCalibration
 from .face import EYES_CLOSED, NO_FACE
 from .gestures import DRAG, MOVE, NO_HAND, PENDING, PRESSED, RIGHT, SCROLL
@@ -190,12 +191,18 @@ class BaseApp:
         self.root.resizable(False, False)
         icon = resource_path("assets/airmouse.ico")
         if icon.exists():
-            self.root.iconbitmap(default=str(icon))
+            if sys.platform == "win32":
+                self.root.iconbitmap(default=str(icon))
+            else:       # X11 takes no .ico: a picture made from it (kept, or Tk forgets it)
+                from PIL import Image, ImageTk
+                self._icon = ImageTk.PhotoImage(Image.open(icon))
+                self.root.iconphoto(True, self._icon)
 
     def _ready(self):
         """Call at the end of the subclass __init__, once the window is built."""
         self.root.attributes("-topmost", self.settings.always_on_top)
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
+        system.note_screen(self.root.winfo_screenwidth(), self.root.winfo_screenheight())
         self.onscreen = OnScreen(self, self.scale() * tuning.get(self.settings, "widget_scale"))
         if self._autostart:
             self._start()
@@ -373,20 +380,22 @@ class BaseApp:
     # -- polling (call every frame from the design's timer) ----------------
 
     def _poll(self):
-        ctrl_alt = winmouse.key_down(winmouse.VK_CONTROL) and winmouse.key_down(winmouse.VK_MENU)
-        down = ctrl_alt and winmouse.key_down(ord("M"))
+        ctrl_alt = system.key_down(system.VK_CONTROL) and system.key_down(system.VK_MENU)
+        down = ctrl_alt and system.key_down(ord("M"))
         if down and not self._hotkey_was_down:
             self._set_control(not self.control)
             self._show_control(self.control)
         self._hotkey_was_down = down
-        down = ctrl_alt and winmouse.key_down(ord("W"))
+        down = ctrl_alt and system.key_down(ord("W"))
         if down and not self._widgets_key_was_down and self.onscreen is not None:
             self.onscreen.toggle()
         self._widgets_key_was_down = down
-        down = ctrl_alt and winmouse.key_down(ord("N"))
+        down = ctrl_alt and system.key_down(ord("N"))
         if down and not self._notebook_key_was_down:
             self.toggle_notebook()
         self._notebook_key_was_down = down
+        root = self.root     # where this window is: a dwell over it is always a plain click (Linux asks here)
+        system.note_window("main", (root.winfo_rootx(), root.winfo_rooty(), root.winfo_width(), root.winfo_height()))
 
         tracker = self.tracker
         self.session.sample(tracker if self._has_frame else None, time.perf_counter())

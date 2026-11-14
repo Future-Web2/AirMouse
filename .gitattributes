@@ -1,0 +1,3 @@
+# Shell scripts and udev rules run on Linux: keep them with LF line ends on every checkout.
+*.sh text eol=lf
+*.rules text eol=lf

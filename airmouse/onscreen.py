@@ -22,7 +22,6 @@ Widget code runs in the Tk thread: mouse handlers from the window procedure
 """
 
 import math
-import os
 import time
 from datetime import datetime
 
@@ -30,7 +29,7 @@ import cv2
 import numpy as np
 
 from . import settings as settings_file
-from . import system, tuning, winmouse
+from . import system, tuning
 from .face import EYES_CLOSED, NO_FACE
 from .gestures import DRAG, MOVE, NO_HAND, PENDING, PRESSED, RIGHT, SCROLL
 from .glass import condensation
@@ -608,7 +607,7 @@ class NotebookWidget(Widget):
     def _paper_w(self):
         if not self.big:
             return self.COMPACT_W - 2 * self.PAD
-        sw, sh = winmouse.screen_size()
+        sw, sh = system.screen_size()
         free_w, free_h = sw / self.s - 48, sh / self.s - 48
         return max(300, min(self.BIG_W, free_w - 2 * self.PAD,
                             (free_h - self.HEADER - self.TOOLBAR) * PAGE_W / PAGE_H))
@@ -689,7 +688,7 @@ class NotebookWidget(Widget):
         self.big = big
         self._base = None
         if big:
-            sw, sh = winmouse.screen_size()
+            sw, sh = system.screen_size()
             w, h = self.panel_size()
             self.spec["x"], self.spec["y"] = (sw - w) // 2, (sh - h) // 2
         elif self._small_at is not None:
@@ -946,7 +945,7 @@ class OnScreen:
 
     def clamp(self, widget, x, y):
         """Keep at least part of the panel on some screen."""
-        left, top, width, height = (winmouse.user32.GetSystemMetrics(i) for i in (76, 77, 78, 79))
+        left, top, width, height = system.screen_bounds()
         w, h = widget.panel_size()
         keep = round(60 * self.s)
         return (int(min(max(x, left - w + keep), left + width - keep)),
@@ -1007,7 +1006,7 @@ class OnScreen:
     def arrange(self, only_new=False):
         """Put widgets in a column along the right edge of the main screen (only_new: those without a place).
         A big one (the notebook) goes in the middle of the screen instead."""
-        sw, sh = winmouse.screen_size()
+        sw, sh = system.screen_size()
         margin, gap = round(24 * self.s), round(12 * self.s)
         x_right, y = sw - margin, margin
         column_w = 0
@@ -1137,6 +1136,6 @@ class OnScreen:
             elif item[0] == "open_folder":
                 try:
                     item[1].mkdir(parents=True, exist_ok=True)
-                    os.startfile(item[1])
+                    system.open_target(str(item[1]))
                 except OSError:
                     pass

@@ -14,7 +14,6 @@ import math
 import statistics
 import sys
 import time
-from ctypes import wintypes
 from pathlib import Path
 
 from .i18n import _
@@ -25,40 +24,16 @@ FRAME_W, FRAME_H = 640, 480
 
 # -- process clock and memory ------------------------------------------------------
 
-_k32 = ctypes.WinDLL("kernel32")
-_k32.GetCurrentProcess.restype = wintypes.HANDLE
-_k32.GetProcessTimes.argtypes = (wintypes.HANDLE,) + (ctypes.POINTER(wintypes.FILETIME),) * 4
-_k32.GetSystemTimePreciseAsFileTime.argtypes = (ctypes.POINTER(wintypes.FILETIME),)
-
-
-class _MemoryCounters(ctypes.Structure):
-    _fields_ = [("cb", wintypes.DWORD), ("PageFaultCount", wintypes.DWORD)] + [
-        (name, ctypes.c_size_t) for name in (
-            "PeakWorkingSetSize", "WorkingSetSize", "QuotaPeakPagedPoolUsage", "QuotaPagedPoolUsage",
-            "QuotaPeakNonPagedPoolUsage", "QuotaNonPagedPoolUsage", "PagefileUsage", "PeakPagefileUsage")]
-
-
-_k32.K32GetProcessMemoryInfo.argtypes = (wintypes.HANDLE, ctypes.POINTER(_MemoryCounters), wintypes.DWORD)
-
-
-def _ticks(filetime):
-    return (filetime.dwHighDateTime << 32) | filetime.dwLowDateTime
-
-
 def uptime():
     """Seconds since this process started (includes the .exe loader and Python's own start-up)."""
-    created, ended, kernel, user, now = (wintypes.FILETIME() for _ in range(5))
-    _k32.GetProcessTimes(_k32.GetCurrentProcess(), ctypes.byref(created), ctypes.byref(ended),
-                         ctypes.byref(kernel), ctypes.byref(user))
-    _k32.GetSystemTimePreciseAsFileTime(ctypes.byref(now))
-    return (_ticks(now) - _ticks(created)) / 1e7
+    from . import system
+    return system.process_uptime()
 
 
 def memory_mb():
-    """RAM this process uses now (working set), MB."""
-    counters = _MemoryCounters(cb=ctypes.sizeof(_MemoryCounters))
-    _k32.K32GetProcessMemoryInfo(_k32.GetCurrentProcess(), ctypes.byref(counters), counters.cb)
-    return counters.WorkingSetSize / 2 ** 20
+    """RAM this process uses now, MB."""
+    from . import system
+    return system.process_memory_mb()
 
 
 def _timed(fn, runs, warmup=3):
@@ -106,6 +81,7 @@ class _OffscreenDC:
     """A device context drawing into memory: times putting the image in a window without showing one."""
 
     def __init__(self, w, h):
+        from ctypes import wintypes
         self.user32, self.gdi32 = ctypes.WinDLL("user32"), ctypes.WinDLL("gdi32")
         self.user32.GetDC.restype = wintypes.HDC
         self.user32.ReleaseDC.argtypes = (wintypes.HWND, wintypes.HDC)
@@ -155,7 +131,7 @@ def window(scale, frames=40):
     from . import ui
     from .glass import LiquidBackdrop
     app = ui.App(scale=scale)
-    screen = _OffscreenDC(*app.size)
+    screen = _OffscreenDC(*app.size) if sys.platform == "win32" else None     # Linux: Tk shows it
     cams = [LiquidBackdrop(FRAME_W, FRAME_H, seed=11).render(i * 0.15) for i in range(6)]
     clock = [0]
 
@@ -163,14 +139,15 @@ def window(scale, frames=40):
         clock[0] += 1
         if camera:
             app._on_frame(cams[clock[0] % len(cams)])
-        app.blitter.show(app.render(clock[0] / FPS, 1 / FPS), screen.dc)
+        app.blitter.show(app.render(clock[0] / FPS, 1 / FPS), screen.dc if screen else None)
 
     result = {
         "size": "%dx%d" % app.size,
         "camera_off": _timed(lambda: frame(False), frames),
         "camera_on": _timed(lambda: frame(True), frames),
     }
-    screen.close()
+    if screen:
+        screen.close()
     app.onscreen.close()
     app.root.destroy()
     return result
@@ -847,8 +824,8 @@ def cursor_quality():
 # -- report -----------------------------------------------------------------------------
 
 def run(out_path=None):
-    from . import winmouse
-    winmouse.enable_dpi_awareness()   # as the app does, before any window
+    from . import system
+    system.enable_dpi_awareness()   # as the app does, before any window
     _isolate_settings()
     _hide_windows()
     report = {"startup": startup()}

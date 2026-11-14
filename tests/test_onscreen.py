@@ -415,7 +415,7 @@ class ManagerTest(unittest.TestCase):
 
     def test_arrange_keeps_widgets_on_the_screen_in_a_column(self):
         self.screen.arrange()
-        sw, sh = onscreen.winmouse.screen_size()
+        sw, sh = onscreen.system.screen_size()
         boxes = []
         for widget, _window in self.screen.items:
             w, h = widget.panel_size()

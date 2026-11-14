@@ -37,10 +37,12 @@ DIB_RGB_COLORS = 0
 
 
 class Blitter:
-    """Shows w x h RGB images in the window hwnd (a Tk widget with no background of its own)."""
+    """Shows w x h RGB images in a window: a Tk widget with no background of its own, or its hwnd.
+    (Windows only; on Linux linuxwindows.TkBlitter does the same.)"""
 
-    def __init__(self, hwnd, w, h):
-        self.hwnd, self.w, self.h = hwnd, w, h
+    def __init__(self, window, w, h):
+        self.hwnd = window.winfo_id() if hasattr(window, "winfo_id") else window
+        self.w, self.h = w, h
         self._bgra = np.zeros((h, w, 4), np.uint8)   # GDI wants BGR(A) rows; 32 bits keeps them aligned
         self._header = BITMAPINFOHEADER(
             biSize=ctypes.sizeof(BITMAPINFOHEADER), biWidth=w, biHeight=-h,   # negative: rows top to bottom

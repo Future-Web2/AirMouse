@@ -12,7 +12,7 @@ from functools import lru_cache
 import cv2
 import numpy as np
 
-from . import resource_path, system, tuning, winmouse
+from . import resource_path, system, tuning
 from .face import EYES, EYES_CLOSED, NO_FACE, NOSE_TIP, FaceEngine, read_face
 from .gestures import DRAG, MOVE, NO_HAND, PENDING, PRESSED, RIGHT, SCROLL, palm_center, zone_rect
 from .i18n import _
@@ -131,7 +131,7 @@ CAMERA_SIZES = {640: (640, 480), 1280: (1280, 720)}
 
 
 def _open_camera(index, width=FRAME_W, fps=30):
-    cap = cv2.VideoCapture(index, cv2.CAP_DSHOW)  # DirectShow opens much faster on Windows
+    cap = cv2.VideoCapture(index, system.CAMERA_API)  # DirectShow on Windows (much faster), V4L2 on Linux
     if not cap.isOpened():
         cap.release()
         cap = cv2.VideoCapture(index)
@@ -204,15 +204,15 @@ class Tracker:
         return frame
 
     def _run(self):
-        mouse = winmouse.Mouse()
-        cap = landmarker = None
+        mouse = cap = landmarker = None
         try:
+            mouse = system.Mouse()
             s = self.settings
             cap = _open_camera(s.camera_index, tuning.get(s, "camera_width"), tuning.get(s, "camera_fps"))
             mp = mediapipe()
             hand_count = 2 if tuning.get(s, "two_hands") else 1
             landmarker = create_landmarker(self.kind, tuning.get(s, "hand_confidence"), hand_count)
-            sw, sh = winmouse.screen_size()
+            sw, sh = system.screen_size()
             if self.kind == "hand":
                 control = HandControl(self.settings, sw, sh)
                 self.dwell = control.dwell
@@ -242,7 +242,7 @@ class Tracker:
                 result = landmarker.detect_for_video(mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb), ms)
 
                 second = None
-                here = winmouse.cursor_pos()
+                here = system.cursor_pos()
                 # Over AirMouse's own panels a dwell is always a plain click (see Dwell.update).
                 own = bool(tuning.get(s, "dwell_click")) and system.own_window_at(here)
                 if self.kind == "hand":
@@ -285,7 +285,8 @@ class Tracker:
         except Exception as exc:  # shown to the user by the UI
             self.error = str(exc) or exc.__class__.__name__
         finally:
-            mouse.release_all()
+            if mouse is not None:
+                mouse.release_all()
             if landmarker is not None:
                 landmarker.close()
             if cap is not None:

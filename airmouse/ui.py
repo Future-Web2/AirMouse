@@ -7,18 +7,23 @@ widgets floating over it. See glass.py for the rendering, widgets.py for control
 
 import ctypes
 import math
+import sys
 import time
 import tkinter as tk
 
 import cv2
 import numpy as np
 
-from . import tuning
+from . import system, tuning
 from .app_base import CALIBRATE_TEXT, METERS, MODES, BaseApp, gesture_rows, meter_value, translated
-from .blit import Blitter
 from .glass import ICON_CAMERA, LiquidBackdrop, blit_text, capsule, shape
 from .i18n import _
 from .widgets import MUTED, TEXT, Button, Segmented, Slider, Stepper, Toggle, set_theme, style
+
+if sys.platform == "win32":
+    from .blit import Blitter
+else:
+    from .linuxwindows import TkBlitter as Blitter
 
 W, H = 1120, 840                         # logical size of the window
 SIDEBAR = (W - 16 - 376, 16, 376, H - 32)
@@ -91,7 +96,7 @@ class App(BaseApp):
         self._build()
         self._apply_mode()
         self.root.update_idletasks()
-        self.blitter = Blitter(self.view.winfo_id(), *self.size)
+        self.blitter = Blitter(self.view, *self.size)
         _style_title_bar(self.root, self.theme["caption"])
         self._t0 = self._last = time.perf_counter()
         self.after(1, self._tick)
@@ -330,8 +335,7 @@ class App(BaseApp):
             return  # the window is closing for a design switch
         if self.root.state() != "iconic":
             self.blitter.show(self.render(start, dt))
-        hwnd = ctypes.windll.user32.GetParent(self.root.winfo_id())
-        in_front = ctypes.windll.user32.GetForegroundWindow() == hwnd
+        in_front = system.window_in_front(self.root)
         spent = time.perf_counter() - start
         fps = tuning.get(self.settings, "window_fps") if in_front else IDLE_FPS
         self.after(max(1, int((1 / fps - spent) * 1000)), self._tick)

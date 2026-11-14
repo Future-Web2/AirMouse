@@ -15,6 +15,8 @@ You need Windows 10 or 11 (64-bit) and any webcam. No Python or other programs a
 
 The `AirMouse` folder can go anywhere, but move it only as a whole.
 
+**Linux.** Download **[AirMouse-linux-x64.tar.gz](https://github.com/Future-Web2/AirMouse/releases/latest/download/AirMouse-linux-x64.tar.gz)**, extract it (`tar -xzf AirMouse-linux-x64.tar.gz`) and run `./install.sh` once in the `AirMouse` folder: it adds AirMouse to the menu and, asking for your password, gives access to `/dev/uinput`, through which AirMouse moves the mouse under X11 and Wayland. Then start AirMouse from the menu or with `./AirMouse`. What works differently on Linux is in the [README](../README.en.md#linux).
+
 ## 2. First start
 
 1. Pick the mode: **Hand**, **Eyes** or **Head**.
@@ -138,7 +140,7 @@ A scratch pad like Paint, above all windows. It opens with the **“Notebook”*
 | ‹ › and + | Turn the pages and add a new one |
 | Corner arrows | Make the notebook nearly as big as the screen, and back |
 
-Pages save themselves a second after a change, in `%APPDATA%\AirMouse\notebook` (PNG pictures), and open again next time. The notebook works with the camera off too; then you draw with the mouse.
+Pages save themselves a second after a change, in `%APPDATA%\AirMouse\notebook` (on Linux, `~/.config/AirMouse/notebook`; PNG pictures), and open again next time. The notebook works with the camera off too; then you draw with the mouse.
 
 For smoother lines, move **“Stabilization”** to the right. For a line that starts right after the pinch, lower “More” → “Clicks” → **“Movement that starts a drag”** to 10 px.
 
@@ -289,4 +291,4 @@ Pick the design in the main window, in the **“Design”** row. The window reop
 - **Ctrl+Alt+W**: show or hide the widgets.
 - **Ctrl+Alt+N**: open or close the notebook.
 - The camera picture is processed right on the computer and is never sent anywhere.
-- The settings are in `%APPDATA%\AirMouse\settings.json`.
+- The settings are in `%APPDATA%\AirMouse\settings.json`, on Linux in `~/.config/AirMouse/settings.json`.

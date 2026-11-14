@@ -1,11 +1,19 @@
-"""User settings, stored in %APPDATA%\\AirMouse\\settings.json."""
+"""User settings, stored in %APPDATA%\\AirMouse\\settings.json (Windows) or ~/.config/AirMouse/settings.json (Linux)."""
 
 import json
 import os
+import sys
 from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 
-SETTINGS_DIR = Path(os.environ.get("APPDATA") or Path.home()) / "AirMouse"
+
+def _settings_dir():
+    if sys.platform == "win32":
+        return Path(os.environ.get("APPDATA") or Path.home()) / "AirMouse"
+    return Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "AirMouse"
+
+
+SETTINGS_DIR = _settings_dir()
 SETTINGS_FILE = SETTINGS_DIR / "settings.json"
 
 

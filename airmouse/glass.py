@@ -11,6 +11,9 @@ that is brighter on the side facing the light; a soft sheen; a drop shadow.
 
 import math
 import os
+import shutil
+import subprocess
+import sys
 from functools import lru_cache
 from pathlib import Path
 
@@ -397,14 +400,47 @@ FONT_FILES = {
     "bold": ("segoeuib.ttf",),
     "icons": ("SegoeIcons.ttf", "segmdl2.ttf"),   # Windows 11 Fluent icons, Windows 10 MDL2 icons
 }
+# Without the Segoe icon font (Linux) these symbols, which ordinary fonts have, stand in for the icons.
+ICON_TEXT = {
+    "": "▶", "": "❚❚", "": "◀◀", "": "▶▶", "": "♪", "": "✕",
+    "": "⚙", "": "▲", "": "▼", "": "✎", "": "▮", "": "⌫",
+    "": "↶", "": "✖", "": "❐", "": "▤", "": "‹", "": "›",
+    "": "+", "": "▢", "": "▫", "": "✕", "": "◉",
+}
+# Linux: what fontconfig picks for the system's sans-serif ("symbols": one that has all of ICON_TEXT),
+# else DejaVu Sans where distributions keep it.
+LINUX_FONTS = {"regular": "sans-serif", "semibold": "sans-serif:weight=semibold", "bold": "sans-serif:bold",
+               "symbols": "sans-serif:charset=" + " ".join(sorted({f"{ord(c):x}" for t in ICON_TEXT.values() for c in t}))}
+LINUX_FALLBACK_DIRS = ("/usr/share/fonts/truetype/dejavu", "/usr/share/fonts/dejavu-sans-fonts", "/usr/share/fonts/TTF",
+                       "/usr/share/fonts/dejavu")
+LINUX_FALLBACK = {"regular": "DejaVuSans.ttf", "semibold": "DejaVuSans-Bold.ttf", "bold": "DejaVuSans-Bold.ttf",
+                  "symbols": "DejaVuSans.ttf"}
 ICON_CAMERA = ""
+
+
+@lru_cache(maxsize=8)
+def font_files(weight):
+    """Font files to try for a weight: Segoe UI on Windows; on Linux the system's sans-serif
+    (and no icon font: ICON_TEXT stands in, drawn with "symbols")."""
+    if sys.platform == "win32":
+        return tuple(FONT_DIR / name for name in FONT_FILES[weight])
+    if weight == "icons":
+        return ()
+    found = ""
+    if shutil.which("fc-match"):
+        try:
+            found = subprocess.run(["fc-match", "-f", "%{file}", LINUX_FONTS[weight]], capture_output=True,
+                                   text=True, timeout=3).stdout.strip()
+        except (OSError, subprocess.SubprocessError):
+            found = ""
+    return ((Path(found),) if found else ()) + tuple(Path(d) / LINUX_FALLBACK[weight] for d in LINUX_FALLBACK_DIRS)
 
 
 @lru_cache(maxsize=64)
 def font(weight, size):
-    for name in FONT_FILES[weight]:
+    for path in font_files(weight):
         try:
-            return ImageFont.truetype(str(FONT_DIR / name), size)
+            return ImageFont.truetype(str(path), size)
         except OSError:
             pass
     return ImageFont.load_default(size)
@@ -412,6 +448,8 @@ def font(weight, size):
 
 @lru_cache(maxsize=2048)
 def _sprite(text, weight, size, color):
+    if weight == "icons" and not font_files("icons"):
+        text, weight = ICON_TEXT.get(text, text), "symbols"
     f = font(weight, size)
     ascent, descent = f.getmetrics()
     w = int(math.ceil(f.getlength(text))) + 2

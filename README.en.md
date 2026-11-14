@@ -2,10 +2,12 @@
 
 [Русский](README.md) · **English**
 
-Control the mouse in Windows 11 through a webcam, without touching the computer: with one hand, with two hands, with your eyes or by turning your head.
+Control the mouse in Windows and Linux through a webcam, without touching the computer: with one hand, with two hands, with your eyes or by turning your head.
 Pick the mode with the **Hand / Eyes / Head** switch at the top of the window. The interface speaks English and Russian: the **RU | EN** switch.
 
 **[Download AirMouse for Windows](https://github.com/Future-Web2/AirMouse/releases/latest/download/AirMouse-windows-x64.zip)** (zip, 83 MB). Extract the whole archive and run `AirMouse\AirMouse.exe`; no Python needed. All versions are on the [Releases](https://github.com/Future-Web2/AirMouse/releases) page.
+
+**[Download for Linux](https://github.com/Future-Web2/AirMouse/releases/latest/download/AirMouse-linux-x64.tar.gz)** (tar.gz): how to install it is in the [Linux](#linux) section.
 
 **How to use it:** [illustrated guide](docs/GUIDE.en.md).
 
@@ -13,13 +15,57 @@ Pick the mode with the **Hand / Eyes / Head** switch at the top of the window. T
 
 ## Getting started
 
-You need Windows 10/11 and a webcam.
+You need Windows 10/11 or Linux (see [Linux](#linux)) and a webcam.
 
 - **Build the program:** run `build.bat` (needs Python 3.12 or newer). It creates `.venv`, installs the dependencies, downloads the hand and face models if they are missing and builds `dist\AirMouse\AirMouse.exe`. Move the `dist\AirMouse` folder only as a whole. Build in a folder with a short path (for example `C:\src\AirMouse`): MediaPipe has long file paths, and in deep folders Windows will not load its libraries.
 - **Run from source:** `.venv\Scripts\python.exe main.py`
 - **Check:** `.venv\Scripts\python.exe -m unittest` runs the tests, `main.py --bench` measures the KPIs (see below).
 
 Press **Start**: the camera and the control come on. **Ctrl+Alt+M** (or a thumbs down held for a second) pauses and resumes the control, **Ctrl+Alt+W** hides and shows the [on-screen widgets](#on-screen-widgets), **Ctrl+Alt+N** opens and closes the [notebook for drawing](#notebook-draw-by-hand).
+
+## Linux
+
+AirMouse runs on Linux too: under X11 and Wayland (GNOME, KDE Plasma and others).
+
+**[Download AirMouse for Linux](https://github.com/Future-Web2/AirMouse/releases/latest/download/AirMouse-linux-x64.tar.gz)** (tar.gz, x86-64; Ubuntu 22.04, Debian 12, Fedora 36 or newer). GitHub Actions builds the archive on Ubuntu 22.04 and attaches it to the release.
+
+```bash
+tar -xzf AirMouse-linux-x64.tar.gz
+cd AirMouse
+./install.sh
+./AirMouse
+```
+
+`install.sh` does two things:
+
+1. adds AirMouse to the applications menu;
+2. gives access to `/dev/uinput`, asking for your password: it installs the udev rule `99-airmouse-uinput.rules` and adds you to the `input` group.
+
+Through `/dev/uinput` AirMouse moves the mouse and presses keys, the same under X11 and Wayland. Without it, under X11 the mouse still works through the XTEST extension; under Wayland AirMouse shows how to give access. If the mouse does not move right after `install.sh`, log out and back in. Only the menu entry, no password: `./install.sh --menu`.
+
+The `/dev/uinput` device can press any key. The rule gives access only to the person at the computer and the `input` group, not to every program.
+
+**From source:** Python 3.12 or newer with Tk (Debian, Ubuntu: `sudo apt install python3-venv python3-tk`). `./build.sh` builds `dist/AirMouse/AirMouse` and the archive `dist/AirMouse-linux-x64.tar.gz`. To run without building: `.venv/bin/python main.py`.
+
+**How Linux differs from Windows:**
+
+| | X11 | Wayland |
+|---|---|---|
+| Cursor, clicks, scrolling, zoom | yes | yes, through `/dev/uinput` |
+| Ctrl+Alt+M, Ctrl+Alt+W, Ctrl+Alt+N | in any window | while an AirMouse window is active; the pause gesture always works |
+| Maximize and minimize a window with the second hand | through the window manager | with the desktop's keys: Super+Up and Super+H (GNOME), Meta+PgUp and Meta+PgDown (KDE) |
+| Show the desktop (palms together) | through the window manager | Super+D |
+| All windows (palms apart) | Super in GNOME, Meta+W in KDE | the same |
+
+- **On-screen widgets** are borderless windows above all others, with rounded corners but no soft shadow: without a compositor X11 cannot do see-through edges. The cursor ring lets clicks through with the SHAPE extension. Under Wayland the widgets run through XWayland.
+- **Icons** on the widgets are ordinary font symbols (▶ ⚙ ✎): Linux has no Segoe Fluent icons, and fontconfig picks the font.
+- **Volume:** through PipeWire (`wpctl`) or PulseAudio (`pactl`).
+- **Copying a notebook page:** through `wl-copy` (Wayland) or `xclip` (X11).
+- **On-screen keyboard:** the “Keyboard” button opens Onboard if it is installed. The “Desktop”, “All windows” and “Screenshot” buttons press the keys your desktop understands.
+- **The two-hand screen magnifier** in GNOME has to be switched on once with Alt+Super+8.
+- **The camera** opens through V4L2. The settings are in `~/.config/AirMouse/`.
+
+The Linux version is checked by 25 tests with stand-ins for the kernel, X11 and programs, and the whole test suite and the model check run on Ubuntu in GitHub Actions. Nobody has tried this version on a real Linux desktop with a camera yet. If something does not work, please open an [issue](https://github.com/Future-Web2/AirMouse/issues) with your distribution, X11 or Wayland, and desktop.
 
 ## Language: English and Russian
 
@@ -208,11 +254,11 @@ The program has measurable goals ([docs/KPI.md](docs/KPI.md), in Russian): archi
 - a minute of work with two hands gives no false action, and 20 pinches of the second hand give exactly 20 clicks while the cursor moves by 1 px;
 - in version 1.6.0 the precise cursor passes 0.30 of the hand's movement to the cursor and moves it by just 1 px when it ends; each new gesture fires exactly once and never by itself; all 302 interface texts are translated.
 
-Measure on your own computer: `AirMouse.exe --bench report.json`. The KPIs and the rest of the logic are checked by 198 tests, run by GitHub Actions on every push.
+Measure on your own computer: `AirMouse.exe --bench report.json`. The KPIs and the rest of the logic are checked by 223 tests, run by GitHub Actions on Windows and Ubuntu on every push.
 
 ## Limitations
 
 - Windows does not let ordinary programs control windows run as administrator (for example the Task Manager). To control them too, run AirMouse as administrator.
-- Control works on the main monitor.
-- The settings are in `%APPDATA%\AirMouse\settings.json`.
+- Control works on the main monitor (on Linux, on the whole X11 screen: all monitors together).
+- The settings are in `%APPDATA%\AirMouse\settings.json` (on Linux, `~/.config/AirMouse/settings.json`).
 - The promo videos, poster and post texts in `promo/` are in Russian.

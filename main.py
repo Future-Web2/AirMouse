@@ -1,11 +1,10 @@
-"""AirMouse: control the Windows mouse with hand gestures in front of a webcam.
+"""AirMouse: control the mouse on Windows and Linux with hand gestures in front of a webcam.
 
     python main.py              start the app
     python main.py --selftest   load the hand model once and exit (checks a build)
     python main.py --bench [report.json]   measure the KPIs of docs/KPI.md
 """
 
-import ctypes
 import os
 import sys
 import traceback
@@ -20,17 +19,6 @@ if sys.stderr is None:
 
 from airmouse.settings import SETTINGS_DIR  # noqa: E402
 
-ERROR_ALREADY_EXISTS = 183
-_instance_mutex = None
-
-
-def _first_instance():
-    """True unless AirMouse is already running; the mutex lives as long as this process."""
-    global _instance_mutex
-    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-    _instance_mutex = kernel32.CreateMutexW(None, False, "Local\\AirMouse.SingleInstance")
-    return ctypes.get_last_error() != ERROR_ALREADY_EXISTS
-
 
 def main():
     if "--selftest" in sys.argv:
@@ -42,16 +30,16 @@ def main():
         args = sys.argv[sys.argv.index("--bench") + 1:]
         return bench.run(args[0] if args else None)
 
-    if not _first_instance():
+    from airmouse import system
+    if not system.single_instance():
         from airmouse import i18n
         from airmouse.settings import Settings
         i18n.set_language(Settings.load().language or i18n.system_language())
-        ctypes.windll.user32.MessageBoxW(None, i18n._("AirMouse уже запущен."), "AirMouse", 0x40)
+        system.show_message(i18n._("AirMouse уже запущен."))
         return 0
 
-    from airmouse import winmouse
     from airmouse.settings import Settings
-    winmouse.enable_dpi_awareness()  # before any window exists
+    system.enable_dpi_awareness()  # before any window exists
     autostart = False
     while True:
         # Switching design closes the window; open it again in the new design,

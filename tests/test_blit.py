@@ -1,12 +1,17 @@
 """The window image goes to Windows unchanged: colour order, row order, every pixel."""
 
 import ctypes
+import sys
 import unittest
-from ctypes import wintypes
 
-import numpy as np
+if sys.platform != "win32":
+    raise unittest.SkipTest("GDI is Windows only (Linux shows the window through Tk)")
 
-from airmouse.blit import BITMAPINFOHEADER, Blitter
+from ctypes import wintypes  # noqa: E402
+
+import numpy as np  # noqa: E402
+
+from airmouse.blit import BITMAPINFOHEADER, Blitter  # noqa: E402
 
 gdi32 = ctypes.WinDLL("gdi32")
 gdi32.CreateCompatibleDC.argtypes = (wintypes.HDC,)

@@ -100,9 +100,9 @@ class LoopTest(unittest.TestCase):
                 mock.patch.object(tracker, "create_landmarker", lambda *a: Landmarker()), \
                 mock.patch.object(tracker, "mediapipe", lambda: fake_mp), \
                 mock.patch.object(tracker, "time", SimpleNamespace(perf_counter=perf_counter, sleep=lambda s: None)), \
-                mock.patch.object(tracker.winmouse, "Mouse", lambda: mouse), \
-                mock.patch.object(tracker.winmouse, "cursor_pos", lambda: (960, 540)), \
-                mock.patch.object(tracker.winmouse, "screen_size", lambda: (1920, 1080)), \
+                mock.patch.object(tracker.system, "Mouse", lambda: mouse), \
+                mock.patch.object(tracker.system, "cursor_pos", lambda: (960, 540)), \
+                mock.patch.object(tracker.system, "screen_size", lambda: (1920, 1080)), \
                 mock.patch.object(tracker.system, "press_keys", keys.append), \
                 mock.patch.object(tracker.system, "window_command", windows.append):
             trk._run()

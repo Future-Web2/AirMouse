@@ -1,11 +1,17 @@
-"""Keys, volume and load. Nothing here presses a key or changes the volume: only reading and parsing."""
+"""Keys, volume and load. Nothing here presses a key or changes the volume: only reading and parsing.
+(The Linux side with stand-ins for the system: test_linux.py.)"""
 
+import sys
 import time
 import unittest
 from unittest import mock
 
 from airmouse import system
-from airmouse.system import KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP
+
+WINDOWS = sys.platform == "win32"
+if WINDOWS:
+    from airmouse import winsystem
+    from airmouse.winsystem import KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP
 
 
 class KeysTest(unittest.TestCase):
@@ -22,8 +28,9 @@ class KeysTest(unittest.TestCase):
                 system.parse_keys(text)
             self.assertTrue(str(caught.exception))
 
+    @unittest.skipUnless(WINDOWS, "SendInput")
     def test_keys_go_down_in_order_and_up_in_reverse(self):
-        events = system.key_events([0x5B, ord("D")])
+        events = winsystem.key_events([0x5B, ord("D")])
         self.assertEqual(events, [(0x5B, KEYEVENTF_EXTENDEDKEY), (ord("D"), 0),
                                   (ord("D"), KEYEVENTF_KEYUP), (0x5B, KEYEVENTF_EXTENDEDKEY | KEYEVENTF_KEYUP)])
 
@@ -39,6 +46,7 @@ class KeysTest(unittest.TestCase):
         self.assertIsNotNone(system.run_action({"do": "nothing"}))
         self.assertIsNotNone(system.open_target(""))
 
+    @unittest.skipUnless(WINDOWS, "SendInput")
     def test_zoom_is_ctrl_held_around_the_wheel(self):
         sent = []
 
@@ -46,12 +54,12 @@ class KeysTest(unittest.TestCase):
             sent.extend((inputs[i].type, inputs[i].u.ki.wVk, inputs[i].u.ki.dwFlags, inputs[i].u.mi.mouseData,
                          inputs[i].u.mi.dwFlags) for i in range(count))
             return count
-        with mock.patch.object(system._user32, "SendInput", send_input):   # nothing is really pressed
-            system.ctrl_wheel(-2)
+        with mock.patch.object(winsystem._user32, "SendInput", send_input):   # nothing is really pressed
+            winsystem.ctrl_wheel(-2)
         (t0, vk0, up0, _d0, _f0), (t1, _vk1, _u1, data, wheel), (t2, vk2, up2, _d2, _f2) = sent
-        self.assertEqual((t0, vk0, up0), (system.INPUT_KEYBOARD, 0x11, 0))
-        self.assertEqual((t1, wheel, data), (system.INPUT_MOUSE, system.MOUSEEVENTF_WHEEL, (-240) & 0xFFFFFFFF))
-        self.assertEqual((t2, vk2, up2), (system.INPUT_KEYBOARD, 0x11, KEYEVENTF_KEYUP))
+        self.assertEqual((t0, vk0, up0), (winsystem.INPUT_KEYBOARD, 0x11, 0))
+        self.assertEqual((t1, wheel, data), (winsystem.INPUT_MOUSE, winsystem.MOUSEEVENTF_WHEEL, (-240) & 0xFFFFFFFF))
+        self.assertEqual((t2, vk2, up2), (winsystem.INPUT_KEYBOARD, 0x11, KEYEVENTF_KEYUP))
 
 
 class WindowTest(unittest.TestCase):

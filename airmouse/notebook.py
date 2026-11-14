@@ -2,16 +2,14 @@
 
 A page keeps the picture it was opened with and the strokes drawn since, so the
 last ones can be undone (clearing the page is a step too). Pages are saved as PNG
-in %APPDATA%\\AirMouse\\notebook a moment after a change, and come back next time.
+in the settings folder (notebook\\ next to settings.json) a moment after a change, and come back next time.
 A page can also be copied to the clipboard as a picture, to paste anywhere.
 
 Drawing happens in page pixels, whatever size the notebook is shown at.
 """
 
-import ctypes
 import struct
 import time
-from ctypes import wintypes
 from pathlib import Path
 
 import cv2
@@ -199,48 +197,18 @@ class Notebook:
         return False
 
     def copy(self):
-        return copy_to_clipboard(self.page.image)
+        """Put the page on the clipboard as a picture. False if that did not work."""
+        from . import system
+        return system.copy_picture(self.page.image)
 
 
 # -- the clipboard ------------------------------------------------------------------------
 
-CF_DIB, GMEM_MOVEABLE = 8, 0x0002
-
-
 def dib(image):
-    """An RGB image as a packed device-independent bitmap (what the clipboard takes as CF_DIB)."""
+    """An RGB image as a packed device-independent bitmap (what the Windows clipboard takes as CF_DIB)."""
     h, w = image.shape[:2]
     stride = (w * 3 + 3) & ~3
     header = struct.pack("<IiiHHIIiiII", 40, w, h, 1, 24, 0, stride * h, 2835, 2835, 0, 0)
     rows = np.zeros((h, stride), np.uint8)
     rows[:, :w * 3] = image[::-1, :, ::-1].reshape(h, w * 3)      # bottom-up, blue first
     return header + rows.tobytes()
-
-
-def copy_to_clipboard(image):
-    """Put the picture on the clipboard. False if Windows would not let us."""
-    data = dib(image)
-    user32, kernel32 = ctypes.WinDLL("user32"), ctypes.WinDLL("kernel32")
-    kernel32.GlobalAlloc.argtypes, kernel32.GlobalAlloc.restype = (wintypes.UINT, ctypes.c_size_t), wintypes.HGLOBAL
-    kernel32.GlobalLock.argtypes, kernel32.GlobalLock.restype = (wintypes.HGLOBAL,), ctypes.c_void_p
-    kernel32.GlobalUnlock.argtypes = (wintypes.HGLOBAL,)
-    kernel32.GlobalFree.argtypes = (wintypes.HGLOBAL,)
-    user32.OpenClipboard.argtypes = (wintypes.HWND,)
-    user32.SetClipboardData.argtypes, user32.SetClipboardData.restype = (wintypes.UINT, wintypes.HANDLE), wintypes.HANDLE
-    handle = kernel32.GlobalAlloc(GMEM_MOVEABLE, len(data))
-    if not handle:
-        return False
-    pointer = kernel32.GlobalLock(handle)
-    ctypes.memmove(pointer, data, len(data))
-    kernel32.GlobalUnlock(handle)
-    if not user32.OpenClipboard(None):
-        kernel32.GlobalFree(handle)
-        return False
-    try:
-        user32.EmptyClipboard()
-        if not user32.SetClipboardData(CF_DIB, handle):     # on success the clipboard owns the memory
-            kernel32.GlobalFree(handle)
-            return False
-    finally:
-        user32.CloseClipboard()
-    return True

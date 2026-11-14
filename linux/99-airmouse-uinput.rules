@@ -1,0 +1,4 @@
+# AirMouse moves the mouse and presses keys through a virtual input device (/dev/uinput), which works
+# under X11 and Wayland alike. This rule lets the person at the computer (uaccess) and the members of
+# the input group make one. Installed by install.sh as /etc/udev/rules.d/99-airmouse-uinput.rules.
+KERNEL=="uinput", SUBSYSTEM=="misc", TAG+="uaccess", GROUP="input", MODE="0660", OPTIONS+="static_node=uinput"
