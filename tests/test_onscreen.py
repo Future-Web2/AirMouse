@@ -414,17 +414,25 @@ class ManagerTest(unittest.TestCase):
         self.assertEqual(self.app.tracker.dwell.kind, "double")
 
     def test_arrange_keeps_widgets_on_the_screen_in_a_column(self):
-        self.screen.arrange()
-        sw, sh = onscreen.system.screen_size()
-        boxes = []
-        for widget, _window in self.screen.items:
-            w, h = widget.panel_size()
-            x, y = widget.spec["x"], widget.spec["y"]
-            self.assertTrue(0 <= x and x + w <= sw and 0 <= y and y + h <= sh)
-            boxes.append((x, y, x + w, y + h))
-        for i, a in enumerate(boxes):
-            for b in boxes[i + 1:]:
-                self.assertFalse(a[0] < b[2] and b[0] < a[2] and a[1] < b[3] and b[1] < a[3], "overlap")
+        """The small widgets go in columns on the right and never overlap; the notebook, opened on purpose
+        and big, goes in the middle of the screen, over them on a small one. The same on any screen
+        (the computer running the tests has its own)."""
+        for sw, sh in ((1024, 768), (1366, 768), (1920, 1080)):
+            with mock.patch.object(onscreen.system, "screen_size", lambda: (sw, sh)):
+                self.screen.arrange()
+            boxes = []
+            for widget, _window in self.screen.items:
+                w, h = widget.panel_size()
+                x, y = widget.spec["x"], widget.spec["y"]
+                self.assertTrue(0 <= x and x + w <= sw and 0 <= y and y + h <= sh, (widget.spec["type"], sw, sh))
+                if widget.CENTRED:
+                    self.assertLessEqual(abs(x + w / 2 - sw / 2), 1)
+                    self.assertLessEqual(abs(y + h / 2 - sh / 2), 1)
+                else:
+                    boxes.append((x, y, x + w, y + h))
+            for i, a in enumerate(boxes):
+                for b in boxes[i + 1:]:
+                    self.assertFalse(a[0] < b[2] and b[0] < a[2] and a[1] < b[3] and b[1] < a[3], ("overlap", sw, sh))
 
 
 class OtherWidgetsTest(unittest.TestCase):
