@@ -1,0 +1,2 @@
+# Railway (Railpack) serves this folder as a static site. Service settings: Root Directory = /site
+root: .

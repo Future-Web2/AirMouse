@@ -3,7 +3,8 @@
     python tools/build_site.py            -> site/index.html (Russian) and site/en/index.html (English)
     python tools/build_site.py --assets   -> also rebuilds site/assets/ from promo/ and docs/
 
-The site/ folder is the whole website: copy it to any static hosting or publish it with GitHub Pages.
+The site/ folder is the whole website: static files for any hosting. On Railway it is a service with
+Root Directory /site: Railway sees index.html (and site/Staticfile) and serves the folder as it is.
 The words are in tools/site_texts.py, the look in site/styles.css, the behaviour in site/app.js.
 
 --assets needs the commercials (promo/AirMouse_ad.mp4, promo/AirMouse_ad_en.mp4): it makes
@@ -569,6 +570,35 @@ def build_assets():
     (ASSETS / "favicon.ico").write_bytes((ROOT / "assets/airmouse.ico").read_bytes())
 
 
+NOT_FOUND = """<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AirMouse — страница не найдена</title>
+<meta name="robots" content="noindex">
+<meta name="theme-color" content="#06101f">
+<link rel="icon" href="/assets/favicon.ico" sizes="any">
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+<div class="backdrop" aria-hidden="true"><i class="orb o1"></i><i class="orb o2"></i><i class="orb o3"></i></div>
+<main class="hero">
+<div class="wrap hero-in">
+<a class="brand" href="/"><img src="/assets/icon.png" width="34" height="34" alt=""><span>AirMouse</span></a>
+<h1>404</h1>
+<p class="lead">Такой страницы нет.<br><span lang="en">This page does not exist.</span></p>
+<div class="cta-row">
+<a class="btn btn-primary" href="/"><span><b>На главную</b></span></a>
+<a class="btn btn-glass" href="/en/" lang="en"><span><b>Home page</b></span></a>
+</div>
+</div>
+</main>
+</body>
+</html>
+"""
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--assets", action="store_true", help="rebuild site/assets from promo/ and docs/")
@@ -580,8 +610,8 @@ def main():
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(Page(lang).render(), encoding="utf-8", newline="\n")
         print(out.relative_to(ROOT))
+    (SITE / "404.html").write_text(NOT_FOUND, encoding="utf-8", newline="\n")
     if SITE_URL:
-        (SITE / "CNAME").write_text(SITE_URL.split("//")[1] + "\n", newline="\n")       # the address for GitHub Pages
         (SITE / "robots.txt").write_text(f"User-agent: *\nAllow: /\nSitemap: {SITE_URL}/sitemap.xml\n", newline="\n")
         (SITE / "sitemap.xml").write_text(
             '<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
