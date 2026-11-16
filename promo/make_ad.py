@@ -55,7 +55,7 @@ from airmouse.glass import LiquidBackdrop  # noqa: E402
 from airmouse.notebook import Notebook  # noqa: E402
 
 W, H, FPS = 1920, 1080, 30
-CTA_URL = REPO                      # where the last scene sends people
+CTA_URL = "airmouse.veranix.xyz"    # where the last scene sends people: the website (site/)
 PUSH, FLASH, FADE = 0.3, 0.35, 0.4  # lengths of the transitions, seconds
 DARK = (8, 14, 26)
 

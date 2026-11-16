@@ -261,4 +261,5 @@ Measure on your own computer: `AirMouse.exe --bench report.json`. The KPIs and t
 - Windows does not let ordinary programs control windows run as administrator (for example the Task Manager). To control them too, run AirMouse as administrator.
 - Control works on the main monitor (on Linux, on the whole X11 screen: all monitors together).
 - The settings are in `%APPDATA%\AirMouse\settings.json` (on Linux, `~/.config/AirMouse/settings.json`).
+- The website is in [`site/`](site/), in Russian and English; `python tools/build_site.py` rebuilds its pages (`--assets` also rebuilds the pictures and video).
 - The poster, the guide video and the post texts in `promo/` are in Russian. The 60-second commercial has an English version: [`promo/AirMouse_ad_en.mp4`](promo/AirMouse_ad_en.mp4) (rebuild it with `python promo/make_ad.py --lang en`).
