@@ -243,6 +243,7 @@ ROWS = ("Отчёт за январь.docx", "Презентация проек�
         "Музыка для работы", "Скриншоты", "AirMouse — промо.mp4", "Договор.pdf", "Идеи.md", "Резюме.docx",
         "Архив.zip")
 SCREEN = (840, 160, 1020, 574)   # where the mock desktop sits in the video; 1920x1080 inside it
+DESKTOP_TITLE, MENU_ITEMS = "Рабочий стол", ("Открыть", "Копировать", "Удалить")   # make_ad.py translates these
 
 
 class Desktop:
@@ -298,7 +299,7 @@ def draw_desktop(frame, snap, t, cursor=None, dots=()):
     sub = frame[y0:y0 + h, x0:x0 + w]
     for i, c in enumerate(((255, 95, 87), (255, 189, 46), (40, 201, 64))):
         capsule(sub, 22 + i * 20, 18, 11, 11, c)
-    text(sub, "Рабочий стол", w / 2, 24, 15, MUTED, "semibold")
+    text(sub, DESKTOP_TITLE, w / 2, 24, 15, MUTED, "semibold")
 
     order = [i for i in range(len(TILES)) if i != snap.drag] + ([snap.drag] if snap.drag is not None else [])
     for i in order:
@@ -337,7 +338,7 @@ def draw_desktop(frame, snap, t, cursor=None, dots=()):
 
         def menu(f):
             glass(196, 136, 18, "caption").draw(f, mx * k + 8, my * k + 8)
-            for j, item in enumerate(("Открыть", "Копировать", "Удалить")):
+            for j, item in enumerate(MENU_ITEMS):
                 text(f, item, mx * k + 30, my * k + 34 + j * 38, 17, (255, 120, 120) if j == 2 else TEXT, "regular",
                      "lm")
         faded(sub, a, menu)
